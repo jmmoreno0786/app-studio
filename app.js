@@ -1369,6 +1369,23 @@
         <button class="btn ghost block" id="delProfile" style="margin-top:12px;color:var(--bad)">Borrar todos los datos de la app</button>
       </div>
 
+      ${speech.supported ? `<div class="card">
+        <h2 style="margin-top:0">🔊 Voz del lector</h2>
+        <p class="muted small">Son las voces instaladas en este dispositivo. Las marcadas con ⭐ suelen sonar más naturales.</p>
+        <div class="row" style="align-items:center">
+          <select id="vsel" style="flex:1 1 260px"></select>
+          <button class="btn" id="vtest" style="flex:0 0 auto">▶️ Probar</button>
+        </div>
+        <details style="margin-top:10px"><summary class="small"><b>¿Cómo consigo una voz más natural?</b></summary>
+          <p class="small">La tablet puede descargar voces de mejor calidad (gratis). Los menús cambian según el modelo:</p>
+          <ul class="small">
+            <li><b>iPad:</b> Ajustes → Accesibilidad → Contenido leído → Voces → Español (España) → descarga una voz <b>"Mejorada"</b> o <b>"Premium"</b>.</li>
+            <li><b>Android:</b> Ajustes → busca <b>"Salida de texto a voz"</b> → motor de Google → Instalar datos de voz → Español (España) → elige una voz.</li>
+          </ul>
+          <p class="small">Después, cierra la app del todo, vuelve a abrirla y elige la voz nueva aquí.</p>
+        </details>
+      </div>` : ''}
+
       <div class="card">
         <h2 style="margin-top:0">🤖 Inteligencia artificial (opcional)</h2>
         <p class="muted small">Para que "Preparar el tema con IA" funcione solo, sin copiar y pegar. Necesita una clave de la API de Claude (cuenta en <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>, con saldo; <b>no</b> la incluye el plan Pro).</p>
@@ -1393,6 +1410,22 @@
       </div>
     `;
 
+    if ($('#vsel')) {
+      const fill = () => {
+        const list = speech.voices();
+        const cur = speech.voice();
+        $('#vsel').innerHTML = list.length
+          ? list.map((v) => `<option value="${esc(v.voiceURI)}" ${cur && v.voiceURI === cur.voiceURI ? 'selected' : ''}>${voiceQuality(v)}${esc(v.name)} (${esc(v.lang)})</option>`).join('')
+          : '<option value="">No hay voces en español en este dispositivo</option>';
+      };
+      fill();
+      // En algunos navegadores la lista de voces llega un poco después.
+      speechSynthesis.onvoiceschanged = () => { if ($('#vsel')) fill(); };
+      $('#vsel').onchange = (e) => { try { localStorage.setItem(VOICE_KEY, e.target.value); } catch (err) { /* nada */ } toast('Voz guardada'); };
+      $('#vtest').onclick = () => {
+        speech.play([`Hola, ${p.name}. Esta es la voz que te leerá los temas. ¿Qué tal suena?`], 1, () => {}, () => {});
+      };
+    }
     $('#aiSave').onclick = () => {
       const cur = aiSettings();
       const key = $('#aik').value.trim() || cur.key || '';
@@ -2292,12 +2325,31 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
   }
 
   // Lectura en voz alta con la voz del dispositivo.
+  const VOICE_KEY = 'app-studio-voice';
+  // Puntuación para elegir la voz más natural disponible en el dispositivo.
+  function voiceScore(v) {
+    let sc = 0;
+    if (/premium|enhanced|mejorad|natural|neural|plus|wavenet|studio/i.test(v.name)) sc += 10;
+    if (/^es[-_]ES/i.test(v.lang)) sc += 4;
+    if (/google|microsoft/i.test(v.name)) sc += 3;
+    if (!v.localService) sc += 1;
+    if (/compact|eloquence|grandma|grandpa|abuel|bad news|bells|boing|bubbles|cellos|jester|organ|superstar|trinoids|whisper|wobble|zarvox|bahh|albert|fred|junior|ralph|kathy/i.test(v.name)) sc -= 20;
+    return sc;
+  }
+  const voiceQuality = (v) => (/premium|enhanced|mejorad|natural|neural|plus|wavenet|studio/i.test(v.name) ? '⭐ ' : '');
   const speech = {
     supported: 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window,
     stop() { if (this.supported) { try { speechSynthesis.cancel(); } catch (e) { /* nada */ } } },
-    voice() {
+    // Voces en español, de la que suena más natural a la más básica.
+    voices() {
       const vs = this.supported ? speechSynthesis.getVoices() : [];
-      return vs.find((v) => v.lang === 'es-ES') || vs.find((v) => /^es/i.test(v.lang)) || null;
+      return vs.filter((v) => /^es/i.test(v.lang)).sort((a, b) => voiceScore(b) - voiceScore(a));
+    },
+    voice() {
+      const list = this.voices();
+      let chosen = null;
+      try { chosen = localStorage.getItem(VOICE_KEY); } catch (e) { /* sin almacenamiento */ }
+      return (chosen && list.find((v) => v.voiceURI === chosen || v.name === chosen)) || list[0] || null;
     },
     // Lee una lista de bloques; avisa de qué bloque está leyendo y cuándo termina.
     play(blocks, rate, onBlock, onEnd) {
