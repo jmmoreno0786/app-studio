@@ -24,9 +24,15 @@ Versión pensada para **un solo alumno** en su propio dispositivo.
 
 ## Cómo usarla
 
-Abre `index.html` en el navegador. No necesita instalar nada.
+Está pensada sobre todo para **tablet**: en horizontal, el esquema y el resumen se ven lado a lado y el test muestra las respuestas en dos columnas. También funciona en móvil y ordenador.
 
-Para usarla desde el móvil o la tablet, lo más fácil es publicarla con **GitHub Pages**: en *Settings → Pages* del repositorio, elige la rama y la carpeta raíz (`/`).
+Se publica con **GitHub Pages** (*Settings → Pages*, rama `main`, carpeta `/`) y se abre desde el navegador de la tablet.
+
+**Instalarla como app** (icono en la pantalla de inicio, a pantalla completa y sin conexión una vez cargada):
+- **iPad (Safari)**: botón Compartir → *Añadir a pantalla de inicio*. En iPad conviene hacerlo: Safari puede borrar los datos de las webs que no se visitan en unos días, pero no los de las apps añadidas a la pantalla de inicio.
+- **Android (Chrome)**: menú ⋮ → *Instalar aplicación* (o *Añadir a pantalla de inicio*).
+
+**Con teclado**: en las tarjetas, espacio para girar, ← "no la sabía" y → "sí la sabía"; en el test, teclas 1–4 para elegir la respuesta.
 
 ## Dónde se guardan los datos
 
@@ -42,3 +48,5 @@ Todo se guarda **solo en el navegador del dispositivo**: temas y progreso en `lo
 - `styles.css`: estilos (incluye modo oscuro)
 - `content.js`: cursos, operaciones de cálculo mental por nivel, asignaturas y sugerencias de editoriales
 - `app.js`: toda la lógica, sin librerías externas
+- `sw.js`: service worker para instalarla y usarla sin conexión (los archivos de la app se piden primero a la red, para recibir las actualizaciones)
+- `manifest.webmanifest` e iconos: datos de la app instalable

@@ -533,6 +533,7 @@
         <div class="card flash" id="flash">
           <div>${esc(card.q)}</div>
           ${revealed ? `<div class="answer">${esc(card.a)}</div>` : '<div class="hint">Toca para ver la respuesta</div>'}
+          <div class="kbd-hint">Teclado: ${revealed ? '← No · → Sí' : 'espacio para girar'}</div>
         </div>
         ${revealed ? `
           <p class="center muted">¿La sabías?</p>
@@ -545,9 +546,11 @@
         const show = () => { revealed = true; render(); };
         $('#flash').onclick = show;
         $('#reveal').onclick = show;
+        onKey((k) => { if (k === ' ' || k === 'Enter') show(); });
       } else {
         $('#yes').onclick = () => answer(true);
         $('#no').onclick = () => answer(false);
+        onKey((k) => { if (k === 'ArrowLeft' || k === '1') answer(false); if (k === 'ArrowRight' || k === '2') answer(true); });
       }
     }
     function answer(ok) {
@@ -603,12 +606,13 @@
         <div class="progress"><div style="width:${(i / questions.length) * 100}%"></div></div>
         <div class="card flash" style="min-height:140px;cursor:default">${esc(card.q)}</div>
         ${mode === 'choice'
-          ? `<div class="options">${optionsFor(card).map((o) => `<button class="btn option" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`
+          ? `<div class="options">${optionsFor(card).map((o, n) => `<button class="btn option" data-v="${esc(o)}"><span class="opt-n">${n + 1}</span>${esc(o)}</button>`).join('')}</div>`
           : `<form id="f"><input type="text" id="ans" class="big-input" autocomplete="off" autocapitalize="off" placeholder="Escribe aquí"><button class="btn primary block" style="margin-top:10px">Comprobar</button></form>`}
         <div id="fb"></div>
       `;
       if (mode === 'choice') {
         $$('.option').forEach((b) => { b.onclick = () => { if (!answered) check(b.dataset.v, b); }; });
+        onKey((k) => { const b = $$('.option')[Number(k) - 1]; if (b && !answered) b.click(); });
       } else {
         const input = $('#ans');
         input.focus();
@@ -1680,6 +1684,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
       ${sections.length > 1 ? `<div class="chips" style="margin-bottom:12px">${sections.map(([k, label]) => `<button class="chip" data-jump="${k}" style="padding:0 14px">${label}</button>`).join('')}</div>` : ''}
       ${!sections.length ? '<div class="card muted">Este tema todavía no tiene explicación. Añádela en "Editar este tema".</div>' : ''}
 
+      <div class="learn-cols ${L.outline && L.summary ? 'two' : ''}">
       ${L.outline ? `<section class="card rich" id="sec-outline"><h2 style="margin-top:0">📋 Esquema</h2>${renderRich(L.outline)}</section>` : ''}
 
       ${L.summary ? `<section class="card rich" id="sec-summary">
@@ -1692,6 +1697,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
         </div>` : ''}
         <div id="summary">${renderRich(L.summary)}</div>
       </section>` : ''}
+      </div>
 
       ${deck.photos?.length ? `<section class="card" id="sec-photos">
         <h2 style="margin-top:0">📷 Fotos del tema</h2>
@@ -2191,12 +2197,25 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     };
   }
 
+  // ---------- Teclado (tablet con teclado) ----------
+  let keyHandler = null;
+  function onKey(fn) { keyHandler = fn; }
+  document.addEventListener('keydown', (e) => {
+    if (!keyHandler || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
+    if (t && t.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter') && !t.closest('#flash')) return;
+    keyHandler(e.key);
+    if (e.key === ' ') e.preventDefault();
+  });
+
   // ---------- Router ----------
   function go(hash) {
     if (location.hash === hash) route(); else location.hash = hash;
   }
   function route() {
     speech.stop();
+    keyHandler = null;
     const parts = (location.hash.replace(/^#\/?/, '') || '').split('/');
     window.scrollTo(0, 0);
     if (!P() && data.profiles.length) data.activeId = data.profiles[0].id;
@@ -2221,6 +2240,11 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     }
   }
   window.addEventListener('hashchange', route);
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* sin modo sin conexión */ });
+  }
+  // Pide al navegador que no borre los datos (fotos, libros) cuando falte espacio.
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if (P()) resetMathCfg();
   route();
 })();

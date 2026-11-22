@@ -411,3 +411,47 @@ label.slider span { min-width: 44px; text-align: right; color: var(--muted); }
 .pv img { width: 100%; height: auto; display: block; }
 .pv span { position: absolute; bottom: 4px; right: 4px; background: rgba(0, 0, 0, 0.6); color: #fff; border-radius: 6px; padding: 0 6px; }
 .list li.sub-item { padding-left: 18px; }
+
+/* Teclado */
+.kbd-hint { display: none; font-size: 0.8rem; font-weight: 400; color: var(--muted); margin-top: 12px; }
+@media (hover: hover) and (pointer: fine) { .kbd-hint { display: block; } }
+.opt-n {
+  display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;
+  min-width: 28px; height: 28px; margin-right: 10px; border-radius: 8px;
+  background: var(--primary-soft); color: var(--primary); font-weight: 700; font-size: 0.9rem;
+}
+section.card { scroll-margin-top: 76px; }
+
+/* Tablet */
+@media (min-width: 768px) {
+  html, body { font-size: 19px; }
+  .container { max-width: 980px; padding: 24px 32px 64px; }
+  h1 { font-size: 1.8rem; }
+  .grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .btn { min-height: 52px; }
+  .flash { min-height: 280px; font-size: 2rem; padding: 32px; }
+  .options { grid-template-columns: 1fr 1fr; gap: 12px; }
+  .option { min-height: 76px; font-size: 1.1rem; }
+  .rich { font-size: 1.05rem; line-height: 1.65; }
+  .thumbs { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .stat .num { font-size: 1.9rem; }
+}
+/* Tablet en horizontal: la pantalla es más baja */
+@media (min-width: 768px) and (max-height: 900px) {
+  .flash { min-height: 200px; }
+}
+/* Pantallas anchas: esquema y resumen lado a lado */
+@media (min-width: 1000px) {
+  .container { max-width: 1200px; }
+  .learn-cols.two {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+    gap: 16px;
+    align-items: start;
+    margin-bottom: 12px;
+  }
+  .learn-cols.two > .card { margin-bottom: 0; }
+  .learn-cols.two #sec-outline { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; }
+  #sec-videos .video { display: inline-block; width: calc(50% - 10px); vertical-align: top; margin-right: 16px; }
+  #sec-videos .video:nth-of-type(2n) { margin-right: 0; }
+}
