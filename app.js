@@ -476,6 +476,11 @@
         ${row(5, 'test', '📝 Test', deck.cards.length ? 'Saca un 7 o más para la estrella' : 'Hace falta tener tarjetas', `#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}`, deck.cards.length > 0)}
       </div>
 
+      ${deck.labelEx?.length ? `<div class="card">
+        <h2 style="margin-top:0">🏷️ Imágenes para completar</h2>
+        <p class="muted small">Dibujos del libro con los nombres tapados: ¿sabrías ponerlos?</p>
+        ${deck.labelEx.map((ex) => `<a class="step" href="#/labels/${deck.id}/${ex.id}"><span class="step-n">🏷️</span><span class="step-body"><b>${esc(ex.title)}</b><span class="muted small">${ex.labels.length} nombres${ex.best != null ? ` · mejor: ${ex.best}/${ex.labels.length}` : ''}</span></span><span class="step-star">${ex.best === ex.labels.length ? '✅' : ''}</span></a>`).join('')}
+      </div>` : ''}
       ${hasMaterial ? `<a class="card deck" href="#/learn/${deck.id}" style="margin-bottom:12px">
         <div class="name">📚 Material del tema</div>
         <div class="muted small">Esquema, resumen para escuchar${deck.photos?.length ? ', páginas del libro' : ''}${deck.videos?.length ? ' y vídeos' : ''}</div>
@@ -483,6 +488,130 @@
       ${deck.cards.length ? `<div class="row" style="margin-bottom:12px"><a class="btn" href="#/quiz/${deck.id}/write">✏️ Test escribiendo la respuesta</a></div>` : ''}
       <a class="btn ghost block" href="#/edit/${deck.id}">✏️ Editar este tema</a>
     `;
+  }
+
+  // ---- Imagen muda: poner los nombres ----
+  function viewLabels(id, exId) {
+    const deck = getDeck(id);
+    const ex = deck?.labelEx?.find((x) => x.id === exId);
+    if (!ex || !ex.crop) return go(`#/deck/${id}`);
+    const labels = ex.labels;
+    let mode = 'bank';
+    let selected = null;
+    let checked = false;
+    const answers = labels.map(() => '');
+    const bank = shuffle([...new Set(labels.map((l) => l.text))]);
+    const isRight = (i) => {
+      const a = lnorm(answers[i]), c = lnorm(labels[i].text);
+      return !!a && (a === c || (c.length > 5 && lev(a, c) <= 1));
+    };
+    // Posición de cada rótulo dentro de la zona recortada (en %), con un pequeño margen para taparlo bien.
+    const pos = (b) => {
+      const padX = 0.6, padY = 0.5;
+      const x = b.x - padX, y = b.y - padY, w = b.w + 2 * padX, h = b.h + 2 * padY;
+      return {
+        left: ((x - ex.crop.x) / ex.crop.w) * 100, top: ((y - ex.crop.y) / ex.crop.h) * 100,
+        width: (w / ex.crop.w) * 100, height: (h / ex.crop.h) * 100,
+      };
+    };
+
+    function render() {
+      app.innerHTML = `
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+        <h1>🏷️ ${esc(ex.title)}</h1>
+        <p class="muted">${mode === 'bank' ? 'Toca un hueco y después el nombre que va ahí.' : 'Escribe el nombre que va en cada número.'}</p>
+        <div class="lbl-wrap" id="lw"><img id="limg" alt="Dibujo del libro con los nombres tapados">
+          ${labels.map((l, i) => {
+            const p = pos(l.box);
+            const st = checked ? (isRight(i) ? 'ok' : 'ko') : '';
+            return `<button class="lbl-box ${st} ${selected === i ? 'sel' : ''} ${answers[i] ? 'filled' : ''}" data-i="${i}" style="left:${p.left}%;top:${p.top}%;width:${p.width}%;height:${p.height}%">
+              ${answers[i] ? `<span class="lbl-txt">${esc(answers[i])}</span>` : `<span class="lbl-n">${i + 1}</span>`}</button>`;
+          }).join('')}
+        </div>
+        ${mode === 'bank' ? `<div class="chips lbl-bank">${bank.map((t) => `<button class="chip ${answers.includes(t) ? 'used' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>` : `
+          <div class="lbl-inputs">${labels.map((l, i) => `<label class="lbl-in"><span class="lbl-n">${i + 1}</span><input type="text" data-in="${i}" value="${esc(answers[i])}" autocomplete="off"></label>`).join('')}</div>`}
+        <div id="lres"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="lcheck">Comprobar</button>
+          <button class="btn" id="lsol">Ver solución</button>
+          <button class="btn" id="lreset">Empezar de nuevo</button>
+        </div>
+        <label class="check mode-toggle"><input type="checkbox" id="lmode" ${mode === 'write' ? 'checked' : ''}> Sin pistas: escribir los nombres</label>`;
+      (async () => {
+        const blob = await photoGet(ex.pid).catch(() => null);
+        if (!blob) return;
+        const key = ['lbl', ex.pid, ex.crop.x, ex.crop.y, ex.crop.w, ex.crop.h].join('|');
+        let url = figCache.get(key);
+        if (!url) {
+          url = URL.createObjectURL(await cropBlob(blob, { left: ex.crop.x, top: ex.crop.y, right: 100 - ex.crop.x - ex.crop.w, bottom: 100 - ex.crop.y - ex.crop.h }));
+          figCache.set(key, url);
+        }
+        const img = $('#limg');
+        if (!img) return;
+        img.onload = sizeText;
+        img.src = url;
+      })();
+      $$('.lbl-box').forEach((b) => {
+        b.onclick = () => {
+          const i = Number(b.dataset.i);
+          if (checked) return;
+          if (mode === 'write') { $(`[data-in="${i}"]`).focus(); return; }
+          if (answers[i]) { answers[i] = ''; selected = i; } else selected = selected === i ? null : i;
+          render();
+        };
+      });
+      $$('.lbl-bank .chip').forEach((c) => {
+        c.onclick = () => {
+          if (checked) return;
+          const t = c.dataset.t;
+          let i = selected;
+          if (i == null) i = answers.findIndex((a) => !a);
+          if (i < 0) return toast('Toca primero el hueco donde va');
+          const prev = answers.indexOf(t);
+          if (prev >= 0) answers[prev] = '';
+          answers[i] = t;
+          selected = answers.findIndex((a) => !a);
+          if (selected < 0) selected = null;
+          render();
+        };
+      });
+      $$('[data-in]').forEach((inp) => {
+        inp.oninput = () => {
+          const i = Number(inp.dataset.in);
+          answers[i] = inp.value;
+          const box = $(`.lbl-box[data-i="${i}"]`);
+          box.classList.toggle('filled', !!inp.value);
+          box.innerHTML = inp.value ? `<span class="lbl-txt">${esc(inp.value)}</span>` : `<span class="lbl-n">${i + 1}</span>`;
+          sizeText();
+        };
+        inp.onfocus = () => { $$('.lbl-box').forEach((b) => b.classList.toggle('sel', b.dataset.i === inp.dataset.in)); };
+      });
+      $('#lmode').onchange = (e) => { mode = e.target.checked ? 'write' : 'bank'; selected = null; render(); };
+      $('#lreset').onclick = () => { answers.fill(''); checked = false; selected = null; render(); };
+      $('#lsol').onclick = () => { labels.forEach((l, i) => { answers[i] = l.text; }); checked = true; render(); $('#lres').innerHTML = '<p class="muted center">Esta es la solución. Pulsa "Empezar de nuevo" para intentarlo tú.</p>'; };
+      $('#lcheck').onclick = () => {
+        if (answers.every((a) => !a.trim())) return toast('Pon algún nombre antes de comprobar');
+        checked = true;
+        const n = labels.filter((_, i) => isRight(i)).length;
+        labels.forEach((_, i) => recordAnswer(isRight(i), POINTS_CARD));
+        ex.best = Math.max(ex.best || 0, n);
+        save();
+        render();
+        $('#lres').innerHTML = `<div class="feedback ${n === labels.length ? 'ok' : 'ko'}">${n === labels.length ? '🏆 ¡Todos bien!' : `Has acertado ${n} de ${labels.length}. Los rojos están mal: pulsa "Empezar de nuevo" o "Ver solución".`}</div>`;
+      };
+    }
+    // Ajusta el tamaño de letra de cada hueco a su altura.
+    function sizeText() {
+      $$('.lbl-box').forEach((b) => {
+        let fs = Math.max(9, Math.min(22, b.clientHeight * 0.62));
+        b.style.fontSize = `${fs}px`;
+        const t = $('.lbl-txt', b);
+        // Reduce la letra hasta que el nombre quepa a lo ancho.
+        while (t && t.scrollWidth > b.clientWidth - 4 && fs > 8) { fs -= 0.5; b.style.fontSize = `${fs}px`; }
+      });
+    }
+    window.onresize = sizeText;
+    render();
   }
 
   // ---- Ilustraciones del libro dentro de la explicación ----
@@ -1764,13 +1893,14 @@ Prepara:
 3. "resumen": resumen de 200 a 500 palabras, en párrafos separados por una línea en blanco, con "# " para los títulos de los apartados y los conceptos más importantes en **negrita**. Debe poder leerse en voz alta.
 4. "tarjetas": entre 10 y 20 preguntas de repaso con respuestas cortas (máximo 10 palabras) y exactas, que sirvan para un test.
 5. "desarrollo": entre 3 y 6 preguntas de desarrollo como las de un examen ("Explica…", "Compara…", "Describe…"), cada una con una "respuesta_modelo" de 120 a 250 palabras bien redactada, como la escribiría un buen alumno de su curso, y los "puntos_clave" (de 4 a 8) que debe incluir una buena respuesta.
+6. "imagenes_mudas": si en las fotos hay dibujos, esquemas o mapas con los nombres de sus partes escritos y señalados (por ejemplo, una célula con sus partes, el aparato digestivo o un mapa con nombres), inclúyelos (hasta 3) para un ejercicio de escribir los nombres: "foto" (número de la foto, empezando en 1), la zona del dibujo con todos sus rótulos en porcentaje de la foto ("x", "y", "ancho", "alto"), un "titulo" corto y las "etiquetas": cada rótulo con su "texto" copiado exactamente como aparece escrito y su posición en porcentaje de la foto ("x", "y", "ancho", "alto"), lo más ajustada posible al texto del rótulo. Solo rótulos que nombren partes del dibujo (no títulos ni pies de foto). Si no hay ninguno, [].
 
 Reglas: usa solo la información del tema y conocimientos básicos seguros; no inventes datos, fechas ni nombres. Si una parte de las fotos no se lee bien, ignórala. Escribe en español de España.`;
   }
   const AI_FORMAT = `
 
 Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más):
-{"explicacion": {"intro": "…", "apartados": [{"titulo": "…", "texto": "…", "ejemplo": "…", "sabias_que": "…", "imagenes": [{"foto": 1, "x": 10, "y": 40, "ancho": 50, "alto": 30, "pie": "…"}], "pregunta": {"enunciado": "…", "opciones": ["…", "…", "…"], "correcta": 0, "explicacion": "…"}}], "linea_tiempo": [{"fecha": "…", "hecho": "…"}], "causas_consecuencias": [{"causa": "…", "consecuencia": "…"}], "glosario": [{"termino": "…", "definicion": "…"}]}, "esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}], "desarrollo": [{"pregunta": "…", "respuesta_modelo": "…", "puntos_clave": ["…"]}]}`;
+{"explicacion": {"intro": "…", "apartados": [{"titulo": "…", "texto": "…", "ejemplo": "…", "sabias_que": "…", "imagenes": [{"foto": 1, "x": 10, "y": 40, "ancho": 50, "alto": 30, "pie": "…"}], "pregunta": {"enunciado": "…", "opciones": ["…", "…", "…"], "correcta": 0, "explicacion": "…"}}], "linea_tiempo": [{"fecha": "…", "hecho": "…"}], "causas_consecuencias": [{"causa": "…", "consecuencia": "…"}], "glosario": [{"termino": "…", "definicion": "…"}]}, "esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}], "desarrollo": [{"pregunta": "…", "respuesta_modelo": "…", "puntos_clave": ["…"]}], "imagenes_mudas": [{"foto": 1, "x": 10, "y": 30, "ancho": 80, "alto": 40, "titulo": "…", "etiquetas": [{"texto": "…", "x": 70, "y": 35, "ancho": 10, "alto": 2}]}]}`;
 
   const str = { type: 'string' };
   const obj = (props) => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
@@ -1791,6 +1921,10 @@ Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más
     resumen: str,
     tarjetas: arr(obj({ pregunta: str, respuesta: str })),
     desarrollo: arr(obj({ pregunta: str, respuesta_modelo: str, puntos_clave: arr(str) })),
+    imagenes_mudas: arr(obj({
+      foto: { type: 'integer' }, x: { type: 'number' }, y: { type: 'number' }, ancho: { type: 'number' }, alto: { type: 'number' }, titulo: str,
+      etiquetas: arr(obj({ texto: str, x: { type: 'number' }, y: { type: 'number' }, ancho: { type: 'number' }, alto: { type: 'number' } })),
+    })),
   });
   const CORRECT_SCHEMA = obj({ nota: { type: 'number' }, puntos: arr(obj({ incluido: { type: 'boolean' } })), bien: str, mejorar: str, consejo: str });
 
@@ -1838,8 +1972,14 @@ Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más
     const desarrollo = (Array.isArray(o.desarrollo) ? o.desarrollo : [])
       .map((d) => ({ q: S(d?.pregunta), model: S(d?.respuesta_modelo), points: (Array.isArray(d?.puntos_clave) ? d.puntos_clave : []).map(S).filter(Boolean) }))
       .filter((d) => d.q && d.model);
+    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : NaN);
+    const mudas = (Array.isArray(o.imagenes_mudas) ? o.imagenes_mudas : []).slice(0, 3).map((m) => ({
+      foto: Number(m?.foto), x: num(m?.x), y: num(m?.y), w: num(m?.ancho), h: num(m?.alto), title: S(m?.titulo),
+      labels: (Array.isArray(m?.etiquetas) ? m.etiquetas : []).map((l) => ({ text: S(l?.texto), x: num(l?.x), y: num(l?.y), w: num(l?.ancho), h: num(l?.alto) }))
+        .filter((l) => l.text && l.text.length <= 60),
+    })).filter((m) => Number.isInteger(m.foto) && m.foto >= 1 && m.labels.length >= 2);
     if (!esquema && !resumen && !tarjetas.length && !explicacion && !desarrollo.length) throw new Error('La respuesta está vacía');
-    return { esquema, resumen, tarjetas, explicacion, desarrollo };
+    return { esquema, resumen, tarjetas, explicacion, desarrollo, mudas };
   }
 
   const blobToBase64 = (blob) => new Promise((resolve, reject) => {
@@ -2296,6 +2436,101 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     return out.slice(0, 60);
   }
 
+  async function createOcrWorker(logger) {
+    await loadScript(OCR.script);
+    return window.Tesseract.createWorker('spa', 1, { workerPath: OCR.workerPath, corePath: OCR.corePath, langPath: OCR.langPath, logger: logger || (() => {}) });
+  }
+
+  // ---------- Imágenes mudas: localizar con precisión los rótulos con el lector de texto ----------
+  const lnorm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  function lev(a, b) {
+    const m = a.length, n = b.length;
+    if (!m || !n) return m + n;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return prev[n];
+  }
+  // Coste de que la palabra leída (w) sea la palabra esperada (t); Infinity si no se parecen.
+  function wordCost(t, w) {
+    if (!w) return Infinity;
+    if (t === w) return 0;
+    if (t.length >= 4 && w.length >= 3 && (t.startsWith(w) || w.startsWith(t))) return 1;
+    const d = lev(t, w);
+    return d <= (t.length > 6 ? 2 : t.length > 3 ? 1 : 0) ? d : Infinity;
+  }
+  const imageSize = (blob) => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => { resolve([img.naturalWidth, img.naturalHeight]); URL.revokeObjectURL(url); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagen')); };
+    img.src = url;
+  });
+  const validBox = (b) => b && [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0 && b.h > 0 && b.x >= 0 && b.y >= 0 && b.x < 100 && b.y < 100;
+
+  async function refineLabels(deck, onStatus) {
+    const list = deck.labelEx || [];
+    if (!list.length) return;
+    let worker = null;
+    try {
+      onStatus('Preparando las imágenes para completar: buscando los nombres en el dibujo…');
+      worker = await createOcrWorker();
+    } catch (e) { worker = null; }
+    for (const [k, ex] of list.entries()) {
+      onStatus(`Preparando la imagen para completar ${k + 1} de ${list.length}…`);
+      const blob = await photoGet(ex.pid).catch(() => null);
+      if (!blob) continue;
+      let lines = [];
+      try {
+        const [W, H] = await imageSize(blob);
+        if (worker) {
+          const { data } = await worker.recognize(blob, {}, { blocks: true });
+          for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) {
+            lines.push((l.words || []).map((w) => ({ t: lnorm(w.text), x0: w.bbox.x0 / W * 100, y0: w.bbox.y0 / H * 100, x1: w.bbox.x1 / W * 100, y1: w.bbox.y1 / H * 100 })).filter((w) => w.t));
+          }
+        }
+      } catch (e) { lines = []; }
+      for (const lab of ex.labels) {
+        const toks = lnorm(lab.text).split(' ').filter(Boolean);
+        let best = null;
+        for (const words of lines) {
+          for (let i = 0; i + toks.length <= words.length; i++) {
+            let cost = 0;
+            for (let j = 0; j < toks.length && cost !== Infinity; j++) cost += wordCost(toks[j], words[i + j].t);
+            if (cost === Infinity) continue;
+            const ws = words.slice(i, i + toks.length);
+            const box = { x: Math.min(...ws.map((w) => w.x0)), y: Math.min(...ws.map((w) => w.y0)), x1: Math.max(...ws.map((w) => w.x1)), y1: Math.max(...ws.map((w) => w.y1)) };
+            // Si hay varias coincidencias, la más cercana a donde dijo Claude.
+            const dist = validBox(lab) ? Math.hypot((box.x + box.x1) / 2 - (lab.x + lab.w / 2), (box.y + box.y1) / 2 - (lab.y + lab.h / 2)) : 0;
+            const score = cost * 50 + dist;
+            if (!best || score < best.score) best = { score, box };
+          }
+        }
+        if (best) lab.box = { x: best.box.x, y: best.box.y, w: best.box.x1 - best.box.x, h: best.box.y1 - best.box.y, exact: true };
+        else if (validBox(lab)) lab.box = { x: lab.x, y: lab.y, w: Math.min(lab.w, 100 - lab.x), h: Math.min(lab.h, 100 - lab.y), exact: false };
+      }
+      // Si el lector de texto ha funcionado, un nombre que no aparece en el dibujo se descarta
+      // (puede que Claude lo haya leído mal o se lo haya inventado y taparía una zona sin nombre).
+      const ocrOk = lines.some((l) => l.length);
+      ex.labels = ex.labels.filter((l) => l.box && (!ocrOk || l.box.exact));
+      // Zona a mostrar: el dibujo más todos los rótulos, con margen.
+      const boxes = ex.labels.map((l) => l.box).concat(validBox(ex) ? [ex] : []);
+      if (boxes.length) {
+        const pad = 3;
+        const x0 = Math.max(0, Math.min(...boxes.map((b) => b.x)) - pad), y0 = Math.max(0, Math.min(...boxes.map((b) => b.y)) - pad);
+        const x1 = Math.min(100, Math.max(...boxes.map((b) => b.x + b.w)) + pad), y1 = Math.min(100, Math.max(...boxes.map((b) => b.y + b.h)) + pad);
+        ex.crop = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      }
+      ex.ready = true;
+    }
+    deck.labelEx = list.filter((ex) => ex.labels.length >= 2 && ex.crop);
+    if (worker) worker.terminate();
+    onStatus(deck.labelEx.length ? `🏷️ ${deck.labelEx.length} ${deck.labelEx.length === 1 ? 'imagen lista' : 'imágenes listas'} para completar.` : '');
+  }
+
   async function runOcr(deck, statusEl) {
     if (!deck.photos.length) return toast('Primero añade alguna foto');
     if (deck.ocrText && !confirm('Ya hay texto sacado de las fotos. ¿Sustituirlo?')) return;
@@ -2340,6 +2575,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
         deck.lesson?.outline && '🗺️ esquema',
         deck.lesson?.summary && '📝 resumen',
         deck.dev?.length && `✍️ ${deck.dev.length} preguntas de desarrollo`,
+        deck.labelEx?.length && `🏷️ ${deck.labelEx.length} ${deck.labelEx.length === 1 ? 'imagen' : 'imágenes'} para completar`,
         deck.cards.length && `🃏 ${deck.cards.length} tarjetas`,
       ].filter(Boolean);
       return parts.length ? `<p class="small ok-line">Ya preparado: ${parts.join(' · ')}</p>` : '';
@@ -2385,6 +2621,11 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
         <h2 style="margin-top:0">🤖 Preparar el tema con IA (Claude)</h2>
         <p class="muted small">Claude lee las páginas (o el texto) y prepara la <b>explicación</b> con ejemplos, el <b>esquema</b>, el <b>resumen</b>, las <b>preguntas de desarrollo</b> y las <b>tarjetas</b>. Revisa siempre el resultado.</p>
         <div id="aiDone">${aiDoneHtml()}</div>
+        <div id="lblStatus" class="muted small"></div>
+        ${deck.labelEx?.length ? `<details class="lbl-admin"><summary class="small"><b>🏷️ Imágenes para completar (${deck.labelEx.length})</b></summary>
+          <ul class="list">${deck.labelEx.map((ex) => `<li><span class="qa">${esc(ex.title)} <span class="muted small">· ${ex.labels.length} nombres${ex.labels.some((l) => !l.box?.exact) ? ' · alguno con posición aproximada' : ''}</span></span>
+            <span><a class="btn" href="#/labels/${deck.id}/${ex.id}">Ver</a> <button class="btn" data-dellbl="${ex.id}">Quitar</button></span></li>`).join('')}</ul>
+        </details>` : ''}
         ${aiSettings().key ? `
           <button class="btn primary block" id="aiAuto">✨ Hacerlo automáticamente</button>
           <div id="aiStatus" class="muted small" style="margin-top:6px"></div>
@@ -2580,8 +2821,20 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
         deck.explain = r.explicacion;
       }
       if (r.desarrollo.length) deck.dev = r.desarrollo;
+      deck.labelEx = (r.mudas || []).map((m) => ({
+        id: uid(), pid: deck.photos[m.foto - 1], title: m.title || 'Pon los nombres',
+        x: m.x, y: m.y, w: m.w, h: m.h, labels: m.labels.map((l) => ({ text: l.text, x: l.x, y: l.y, w: l.w, h: l.h })),
+      })).filter((m) => m.pid);
       save();
       $('#aiDone').innerHTML = aiDoneHtml();
+      if (deck.labelEx.length) {
+        const st = $('#lblStatus');
+        refineLabels(deck, (t) => { if (st) st.textContent = t; }).then(() => {
+          save();
+          const d = $('#aiDone');
+          if (d) d.innerHTML = aiDoneHtml();
+        });
+      }
       $('#lo').value = deck.lesson.outline;
       $('#ls').value = deck.lesson.summary;
       const box = $('#aiProposals');
@@ -2648,6 +2901,15 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
       $('#aiPaste').value = '';
       applyAi(r);
     };
+
+    $$('[data-dellbl]').forEach((b) => {
+      b.onclick = () => {
+        if (!confirm('¿Quitar esta imagen para completar?')) return;
+        deck.labelEx = deck.labelEx.filter((x) => x.id !== b.dataset.dellbl);
+        save();
+        viewEdit(id);
+      };
+    });
 
     // Explicación (esquema y resumen)
     $('#genLesson').onclick = () => {
@@ -2750,6 +3012,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     if (location.hash === hash) route(); else location.hash = hash;
   }
   function route() {
+    window.onresize = null;
     $$('.lightbox').forEach((x) => x.remove());
     speech.stop();
     stopDictation();
@@ -2766,6 +3029,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
       case 'photos': return viewPhotos(parts[1]);
       case 'learn': return viewLearn(parts[1]);
       case 'explain': return viewExplain(parts[1]);
+      case 'labels': return viewLabels(parts[1], parts[2]);
       case 'blank': return viewBlank(parts[1]);
       case 'dev': return viewDev(parts[1], parts[2] != null && parts[2] !== '' ? Number(parts[2]) : null);
       case 'study': return viewStudy(parts[1]);
