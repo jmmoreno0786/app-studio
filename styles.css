@@ -533,3 +533,19 @@ a.step:active { transform: scale(0.99); }
 .your-ans.exact { border-color: var(--good); background: var(--good-soft); }
 .your-ans.close { border-color: #d97706; }
 .match-msg { margin-top: 4px; }
+
+/* Ilustraciones del libro en la explicación */
+.fig { margin: 16px 0 4px; text-align: center; }
+.fig-btn { border: 0; padding: 0; background: transparent; cursor: zoom-in; display: block; margin: 0 auto; max-width: 100%; }
+.fig img { display: block; max-width: 100%; max-height: 50vh; width: auto; height: auto; margin: 0 auto; border-radius: 10px; border: 1px solid var(--border); background: #fff; }
+.fig figcaption { margin-top: 8px; font-size: 0.95rem; color: var(--text); }
+.fig-hint { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+.lightbox {
+  position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, 0.88);
+  display: flex; align-items: center; justify-content: center; padding: 16px; overflow: auto;
+}
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; background: #fff; }
+.lb-close {
+  position: fixed; top: 14px; right: 14px; width: 48px; height: 48px; border-radius: 999px; border: 0;
+  background: rgba(255, 255, 255, 0.9); color: #111; font-size: 1.3rem; cursor: pointer;
+}

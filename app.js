@@ -485,11 +485,59 @@
     `;
   }
 
+  // ---- Ilustraciones del libro dentro de la explicación ----
+  const figCache = new Map();
+  async function figureUrl(im) {
+    const key = [im.pid, im.x, im.y, im.w, im.h].join('|');
+    if (figCache.has(key)) return figCache.get(key);
+    const blob = await photoGet(im.pid).catch(() => null);
+    if (!blob) return null;
+    let url;
+    if (Number.isFinite(im.x) && Number.isFinite(im.w)) {
+      // Margen alrededor de la zona por si Claude no la ha marcado con exactitud.
+      const pad = 4;
+      const c = {
+        left: Math.max(0, im.x - pad), top: Math.max(0, im.y - pad),
+        right: Math.max(0, 100 - (im.x + im.w) - pad), bottom: Math.max(0, 100 - (im.y + im.h) - pad),
+      };
+      url = URL.createObjectURL(await cropBlob(blob, c).catch(() => blob));
+    } else {
+      url = URL.createObjectURL(blob);
+    }
+    figCache.set(key, url);
+    return url;
+  }
+  async function hydrateFigures(a, i) {
+    const list = (a.imagenes || []).filter((im) => getDeckPhotos().includes(im.pid));
+    for (const [k, im] of list.entries()) {
+      const el = $(`img[data-fig="${i}-${k}"]`);
+      if (!el) continue;
+      const url = await figureUrl(im);
+      if (url) el.src = url; else el.closest('figure')?.remove();
+    }
+    $$('[data-full]').forEach((b) => { b.onclick = () => openLightbox(b.dataset.full); });
+  }
+  let currentDeckPhotos = [];
+  const getDeckPhotos = () => currentDeckPhotos;
+  async function openLightbox(pid) {
+    const url = await photoUrl(pid);
+    if (!url) return;
+    const lb = document.createElement('div');
+    lb.className = 'lightbox';
+    lb.innerHTML = `<img src="${url}" alt="Página del libro"><button class="lb-close" aria-label="Cerrar">✕</button>`;
+    const close = () => { lb.remove(); document.removeEventListener('keydown', onEsc); };
+    const onEsc = (e) => { if (e.key === 'Escape') close(); };
+    lb.onclick = (e) => { if (e.target === lb || e.target.classList.contains('lb-close')) close(); };
+    document.addEventListener('keydown', onEsc);
+    document.body.appendChild(lb);
+  }
+
   // ---- Entender: explicación por pantallas ----
   function viewExplain(id) {
     const deck = getDeck(id);
     if (!deck || !deck.explain) return go(`#/deck/${id}`);
     const ex = deck.explain;
+    currentDeckPhotos = deck.photos || [];
     const screens = [{ type: 'intro' }, ...ex.apartados.map((a, i) => ({ type: 'ap', a, i }))];
     if (ex.linea_tiempo.length || ex.causas_consecuencias.length) screens.push({ type: 'rel' });
     if (ex.glosario.length) screens.push({ type: 'glo' });
@@ -510,6 +558,12 @@
           <div class="muted small">Apartado ${sc.i + 1} de ${ex.apartados.length}</div>
           <h2 data-say>${esc(a.titulo)}</h2>
           ${renderRich(a.texto)}
+          ${(a.imagenes || []).filter((im) => deck.photos.includes(im.pid)).map((im, k) => `
+            <figure class="fig">
+              <button class="fig-btn" data-full="${im.pid}" aria-label="Ver la página completa"><img data-fig="${sc.i}-${k}" alt="${esc(im.pie || 'Ilustración del libro')}"></button>
+              ${im.pie ? `<figcaption data-say>📷 ${inline(im.pie)}</figcaption>` : ''}
+              <div class="fig-hint">Toca la imagen para ver la página completa</div>
+            </figure>`).join('')}
           ${a.ejemplo ? `<div class="box example"><b>🧩 Para entenderlo</b><p data-say>${inline(a.ejemplo)}</p></div>` : ''}
           ${a.sabias_que ? `<div class="box fun"><b>💡 ¿Sabías que…?</b><p data-say>${inline(a.sabias_que)}</p></div>` : ''}
           </div>
@@ -553,6 +607,7 @@
           <button class="btn primary" id="next" ${needsAnswer ? 'disabled' : ''}>${needsAnswer ? 'Responde para seguir' : 'Siguiente →'}</button>
         </div>` : ''}`;
       if (sc.type === 'end') markStep(deck, 'entender');
+      if (sc.type === 'ap') hydrateFigures(sc.a, sc.i);
       if ($('#prev')) $('#prev').onclick = () => { n--; render(); window.scrollTo(0, 0); };
       if ($('#next')) $('#next').onclick = () => { n++; render(); window.scrollTo(0, 0); };
       onKey((k) => {
@@ -1699,6 +1754,7 @@ Prepara:
      · "texto": explicación clara y completa (100 a 250 palabras), con frases cortas, párrafos separados por una línea en blanco y los conceptos clave en **negrita**. No te saltes contenidos del tema.
      · "ejemplo": un ejemplo o comparación con la vida cotidiana de un chico de su edad que ayude a entenderlo.
      · "sabias_que": una curiosidad real relacionada con el apartado, o "" si no tienes una segura.
+     · "imagenes": si en las fotos hay ilustraciones, mapas, esquemas, dibujos, gráficos o tablas que ayuden a entender este apartado, indica hasta 2: "foto" = número de la foto donde está (empezando en 1, en el orden en que te las paso), la zona que ocupa la ilustración en porcentaje del ancho y alto de esa foto ("x" e "y" de la esquina superior izquierda, "ancho" y "alto", de 0 a 100) y un "pie" que explique qué se ve y qué hay que fijarse. Solo ilustraciones que existan de verdad en las fotos, nunca zonas que sean solo texto. Si no hay, [].
      · "pregunta": pregunta de comprensión con 3 o 4 "opciones", el índice de la "correcta" (empezando en 0) y una "explicacion" breve de por qué es la correcta.
    - "linea_tiempo": fechas o etapas en orden, si el tema es de Historia o tiene cronología; si no, [].
    - "causas_consecuencias": si el tema tiene hechos o procesos con causas y consecuencias; si no, [].
@@ -1714,7 +1770,7 @@ Reglas: usa solo la información del tema y conocimientos básicos seguros; no i
   const AI_FORMAT = `
 
 Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más):
-{"explicacion": {"intro": "…", "apartados": [{"titulo": "…", "texto": "…", "ejemplo": "…", "sabias_que": "…", "pregunta": {"enunciado": "…", "opciones": ["…", "…", "…"], "correcta": 0, "explicacion": "…"}}], "linea_tiempo": [{"fecha": "…", "hecho": "…"}], "causas_consecuencias": [{"causa": "…", "consecuencia": "…"}], "glosario": [{"termino": "…", "definicion": "…"}]}, "esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}], "desarrollo": [{"pregunta": "…", "respuesta_modelo": "…", "puntos_clave": ["…"]}]}`;
+{"explicacion": {"intro": "…", "apartados": [{"titulo": "…", "texto": "…", "ejemplo": "…", "sabias_que": "…", "imagenes": [{"foto": 1, "x": 10, "y": 40, "ancho": 50, "alto": 30, "pie": "…"}], "pregunta": {"enunciado": "…", "opciones": ["…", "…", "…"], "correcta": 0, "explicacion": "…"}}], "linea_tiempo": [{"fecha": "…", "hecho": "…"}], "causas_consecuencias": [{"causa": "…", "consecuencia": "…"}], "glosario": [{"termino": "…", "definicion": "…"}]}, "esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}], "desarrollo": [{"pregunta": "…", "respuesta_modelo": "…", "puntos_clave": ["…"]}]}`;
 
   const str = { type: 'string' };
   const obj = (props) => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
@@ -1724,6 +1780,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más
       intro: str,
       apartados: arr(obj({
         titulo: str, texto: str, ejemplo: str, sabias_que: str,
+        imagenes: arr(obj({ foto: { type: 'integer' }, x: { type: 'number' }, y: { type: 'number' }, ancho: { type: 'number' }, alto: { type: 'number' }, pie: str })),
         pregunta: obj({ enunciado: str, opciones: arr(str), correcta: { type: 'integer' }, explicacion: str }),
       })),
       linea_tiempo: arr(obj({ fecha: str, hecho: str })),
@@ -1746,6 +1803,9 @@ Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más
       const correcta = Number.isInteger(q.correcta) && q.correcta >= 0 && q.correcta < opciones.length ? q.correcta : -1;
       return {
         titulo: S(a?.titulo), texto: S(a?.texto), ejemplo: S(a?.ejemplo), sabias_que: S(a?.sabias_que),
+        imagenes: (Array.isArray(a?.imagenes) ? a.imagenes : []).slice(0, 2).map((im) => ({
+          foto: Number(im?.foto), x: Number(im?.x), y: Number(im?.y), w: Number(im?.ancho), h: Number(im?.alto), pie: S(im?.pie),
+        })).filter((im) => Number.isInteger(im.foto) && im.foto >= 1),
         pregunta: S(q.enunciado) && opciones.length >= 2 && correcta >= 0 ? { enunciado: S(q.enunciado), opciones, correcta, explicacion: S(q.explicacion) } : null,
       };
     }).filter((a) => a.titulo || a.texto);
@@ -1869,6 +1929,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más
     }
     for (const [i, blob] of blobs.entries()) {
       onStatus(`Preparando foto ${i + 1} de ${blobs.length}…`);
+      content.push({ type: 'text', text: `Foto ${i + 1}:` });
       content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await blobToBase64(blob) } });
     }
     const text = (deck.ocrText || '').trim();
@@ -2507,7 +2568,17 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     const applyAi = (r) => {
       const had = deck.lesson?.outline || deck.lesson?.summary || deck.explain;
       deck.lesson = { outline: r.esquema || deck.lesson?.outline || '', summary: r.resumen || deck.lesson?.summary || '' };
-      if (r.explicacion) deck.explain = r.explicacion;
+      if (r.explicacion) {
+        r.explicacion.apartados.forEach((a) => {
+          a.imagenes = (a.imagenes || []).map((im) => {
+            const pid = deck.photos[im.foto - 1];
+            if (!pid) return null;
+            const ok = [im.x, im.y, im.w, im.h].every((v) => Number.isFinite(v)) && im.w >= 3 && im.h >= 3 && im.x >= 0 && im.y >= 0 && im.x < 100 && im.y < 100;
+            return ok ? { pid, x: im.x, y: im.y, w: Math.min(im.w, 100 - im.x), h: Math.min(im.h, 100 - im.y), pie: im.pie } : { pid, pie: im.pie };
+          }).filter(Boolean);
+        });
+        deck.explain = r.explicacion;
+      }
       if (r.desarrollo.length) deck.dev = r.desarrollo;
       save();
       $('#aiDone').innerHTML = aiDoneHtml();
@@ -2679,6 +2750,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     if (location.hash === hash) route(); else location.hash = hash;
   }
   function route() {
+    $$('.lightbox').forEach((x) => x.remove());
     speech.stop();
     stopDictation();
     keyHandler = null;

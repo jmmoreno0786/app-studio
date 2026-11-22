@@ -12,7 +12,7 @@ Versión pensada para **un solo alumno** en su propio dispositivo.
 - **🔎 Buscador de temas** por curso, asignatura, editorial, número de tema o cualquier palabra del contenido.
 - **🔤 Texto del tema**: viene del PDF, se lee de las fotos (OCR con [Tesseract.js](https://github.com/naptha/tesseract.js), en el navegador) o se pega a mano.
 - **🧭 Ruta de estudio por tema** (una ⭐ por paso):
-  1. **📖 Entender el tema**: explicación por pantallas, como la de un buen profesor. Lleva introducción, cada apartado explicado con un ejemplo de la vida cotidiana, "¿Sabías que…?" y una pregunta de comprensión para poder seguir. Termina con la línea del tiempo, las causas y consecuencias y un glosario, y todo se puede escuchar.
+  1. **📖 Entender el tema**: explicación por pantallas, como la de un buen profesor. Lleva introducción, cada apartado explicado con las **ilustraciones del libro** que ayudan a entenderlo (Claude indica en qué página está cada una y qué zona ocupa, la app la recorta con margen y al tocarla se ve la página completa), un ejemplo de la vida cotidiana, "¿Sabías que…?" y una pregunta de comprensión para poder seguir. Termina con la línea del tiempo, las causas y consecuencias y un glosario, y todo se puede escuchar.
   2. **🗺️ Esquema en blanco**: las ideas del esquema aparecen tapadas y hay que recordarlas antes de destaparlas (opcionalmente también los títulos), para memorizar la estructura del tema.
   3. **🃏 Tarjetas**: repaso espaciado.
   4. **✍️ Preguntas de desarrollo** tipo examen. Se escribe o se dicta la respuesta. Con clave de API, Claude la corrige (nota, lo que está bien, lo que falta, consejo y puntos clave incluidos). Sin clave, el alumno se autoevalúa con los puntos clave y ve la respuesta modelo.
