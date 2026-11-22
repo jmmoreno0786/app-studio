@@ -959,6 +959,20 @@
       </div>
 
       <div class="card">
+        <h2 style="margin-top:0">🤖 Inteligencia artificial (opcional)</h2>
+        <p class="muted small">Para que "Preparar el tema con IA" funcione solo, sin copiar y pegar. Necesita una clave de la API de Claude (cuenta en <a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a>, con saldo; <b>no</b> la incluye el plan Pro).</p>
+        <p class="muted small">La clave se guarda <b>solo en este dispositivo</b>: no va en las copias de seguridad ni al compartir temas. Quien use este móvil podría usarla, así que pon un <b>límite de gasto</b> en la consola.</p>
+        <label for="aik">Clave de la API</label>
+        <input type="password" id="aik" autocomplete="off" placeholder="${aiSettings().key ? '•••••••• (guardada)' : 'sk-ant-…'}">
+        <label for="aim">Modelo</label>
+        <select id="aim">${AI_MODELS.map((m) => `<option value="${m.id}" ${m.id === (aiSettings().model || AI_MODELS[0].id) ? 'selected' : ''}>${m.label}</option>`).join('')}</select>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="aiSave">Guardar</button>
+          ${aiSettings().key ? '<button class="btn" id="aiDel" style="color:var(--bad)">Borrar clave</button>' : ''}
+        </div>
+      </div>
+
+      <div class="card">
         <h2 style="margin-top:0">Copia de seguridad</h2>
         <p class="muted small">Los datos de todos los perfiles se guardan solo en este navegador. Descarga una copia para pasarlos a otro dispositivo o por si se borra el navegador.<br><b>Las fotos no van en la copia</b> (ocuparía demasiado): se quedan en este dispositivo.</p>
         <div class="row">
@@ -977,6 +991,22 @@
         save();
         viewParents();
         toast(`${toAdd.length} ${toAdd.length === 1 ? 'tema añadido' : 'temas añadidos'}`);
+      };
+    }
+    $('#aiSave').onclick = () => {
+      const cur = aiSettings();
+      const key = $('#aik').value.trim() || cur.key || '';
+      if (key && !/^sk-ant-/.test(key)) return toast('La clave debería empezar por sk-ant-');
+      if (!setAiSettings({ key, model: $('#aim').value })) return toast('No se pudo guardar en este navegador');
+      viewParents();
+      toast(key ? 'Ajustes de IA guardados' : 'Modelo guardado (falta la clave)');
+    };
+    if ($('#aiDel')) {
+      $('#aiDel').onclick = () => {
+        if (!confirm('¿Borrar la clave de la API de este dispositivo?')) return;
+        setAiSettings({ model: aiSettings().model });
+        viewParents();
+        toast('Clave borrada');
       };
     }
     $('#nm').onchange = (e) => { const v = e.target.value.trim(); if (v) { p.name = v; save(); toast('Guardado'); } };
@@ -1014,6 +1044,176 @@
       };
       reader.readAsText(file);
     };
+  }
+
+  // ---------- Propuestas de tarjetas (revisar antes de añadir) ----------
+  function showProposals(box, props, deck, onAdded) {
+    box.innerHTML = `
+      <h2>Tarjetas propuestas (${props.length})</h2>
+      <p class="muted small">Revisa y corrige cada una. Desmarca las que no quieras.</p>
+      ${props.map((pr, i) => `
+        <div class="proposal">
+          <input type="checkbox" checked data-pi="${i}" aria-label="Usar esta tarjeta">
+          <div class="pq">
+            <input type="text" value="${esc(pr.q)}" data-pq="${i}" aria-label="Pregunta">
+            <textarea rows="2" data-pa="${i}" aria-label="Respuesta">${esc(pr.a)}</textarea>
+          </div>
+        </div>`).join('')}
+      <button class="btn primary block" data-addprops style="margin-top:10px">Añadir las tarjetas marcadas</button>`;
+    $('[data-addprops]', box).onclick = () => {
+      let n = 0;
+      $$('[data-pi]', box).forEach((cb) => {
+        if (!cb.checked) return;
+        const i = cb.dataset.pi;
+        const q = $(`[data-pq="${i}"]`, box).value.trim(), a = $(`[data-pa="${i}"]`, box).value.trim();
+        if (q && a) { deck.cards.push(newCard(q, a)); n++; }
+      });
+      if (!n) return toast('No hay ninguna tarjeta marcada');
+      save();
+      onAdded();
+      toast(`${n} tarjetas añadidas`);
+    };
+  }
+
+  // ---------- IA (Claude) ----------
+  // Dos formas: (1) copiar/pegar con la app de Claude del usuario; (2) llamada directa a la API con una clave
+  // que se guarda solo en este dispositivo (nunca en las copias de seguridad ni al compartir).
+  const AI_KEY = 'app-studio-ai';
+  const AI_MODELS = [
+    { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (el mejor, ~10 cts/tema)', price: [4, 20], fallbacks: true },
+    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (muy bueno, ~5 cts/tema)', price: [2, 10], fallbacks: true },
+    { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (el más barato, <1 ct/tema)', price: [0.1, 0.5], fallbacks: false },
+  ];
+  function aiSettings() {
+    try { return JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { return {}; }
+  }
+  function setAiSettings(v) {
+    try { localStorage.setItem(AI_KEY, JSON.stringify(v)); return true; } catch (e) { return false; }
+  }
+
+  function aiInstructions(deck, source) {
+    const course = courseById(deck.course)?.label || courseById(P().course)?.label || 'Secundaria';
+    const what = [deck.subject && `de ${deck.subject}`, deck.publisher && `(libro de ${deck.publisher})`].filter(Boolean).join(' ');
+    return `Eres un profesor que ayuda a un alumno de ${course} a estudiar.
+Te paso ${source} del tema "${deckTitle(deck)}" ${what}.
+Con esa información prepara material de estudio:
+
+1. "esquema": esquema del tema. Usa "# " al principio de la línea para cada apartado, "- " para cada idea y "  - " (dos espacios) para las subideas. Frases cortas. Marca los conceptos clave con **negrita**.
+2. "resumen": resumen claro y fácil de entender para su edad, de 200 a 500 palabras, en párrafos separados por una línea en blanco. Usa "# " para los títulos de los apartados y pon en **negrita** los conceptos más importantes. Debe poder leerse en voz alta.
+3. "tarjetas": entre 10 y 20 preguntas de repaso con respuestas cortas (máximo 10 palabras) y exactas, que sirvan para un test.
+
+Reglas: usa solo la información del tema y no inventes datos. Si una parte de una foto no se lee bien, ignórala. Escribe en español.`;
+  }
+  const AI_FORMAT = `
+
+Responde SOLO con un bloque de código JSON con esta forma exacta:
+{"esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}]}`;
+  const AI_SCHEMA = {
+    type: 'object',
+    properties: {
+      esquema: { type: 'string' },
+      resumen: { type: 'string' },
+      tarjetas: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { pregunta: { type: 'string' }, respuesta: { type: 'string' } },
+          required: ['pregunta', 'respuesta'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['esquema', 'resumen', 'tarjetas'],
+    additionalProperties: false,
+  };
+
+  // Lee la respuesta (JSON) de Claude, venga de la API o pegada a mano.
+  function parseAiResult(raw) {
+    let t = String(raw || '').trim();
+    const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) t = fence[1];
+    const a = t.indexOf('{'), b = t.lastIndexOf('}');
+    if (a < 0 || b <= a) throw new Error('No encuentro el bloque JSON en la respuesta');
+    const jsonText = t.slice(a, b + 1);
+    let obj;
+    try { obj = JSON.parse(jsonText); } catch (e) { obj = JSON.parse(jsonText.replace(/[“”]/g, '"')); }
+    const esquema = String(obj.esquema || '').trim();
+    const resumen = String(obj.resumen || '').trim();
+    const tarjetas = (Array.isArray(obj.tarjetas) ? obj.tarjetas : [])
+      .map((c) => ({ q: String(c.pregunta || c.q || '').trim(), a: String(c.respuesta || c.a || '').trim() }))
+      .filter((c) => c.q && c.a);
+    if (!esquema && !resumen && !tarjetas.length) throw new Error('La respuesta está vacía');
+    return { esquema, resumen, tarjetas };
+  }
+
+  const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).split(',')[1]);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
+
+  // Llamada directa a la API de Claude desde el navegador (solo para uso personal en este dispositivo).
+  async function aiGenerate(deck, onStatus) {
+    const cfg = aiSettings();
+    if (!cfg.key) throw new Error('Falta la clave de la API (Zona padres → Inteligencia artificial)');
+    const model = AI_MODELS.find((m) => m.id === cfg.model) || AI_MODELS[0];
+    const content = [];
+    const blobs = [];
+    for (const pid of deck.photos || []) {
+      const blob = await photoGet(pid).catch(() => null);
+      if (blob) blobs.push(blob);
+    }
+    for (const [i, blob] of blobs.entries()) {
+      onStatus(`Preparando foto ${i + 1} de ${blobs.length}…`);
+      content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: await blobToBase64(blob) } });
+    }
+    const text = (deck.ocrText || '').trim();
+    if (!blobs.length && !text) throw new Error('El tema no tiene fotos ni texto');
+    const source = blobs.length ? `${blobs.length} ${blobs.length === 1 ? 'foto' : 'fotos'}` : 'el texto';
+    content.push({ type: 'text', text: aiInstructions(deck, source) + (blobs.length ? '' : `\n\nTexto del tema:\n${text}`) });
+
+    const body = {
+      model: model.id,
+      max_tokens: 16000,
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: AI_SCHEMA } },
+      messages: [{ role: 'user', content }],
+    };
+    const send = async (withFallbacks) => {
+      const headers = {
+        'content-type': 'application/json',
+        'x-api-key': cfg.key,
+        'anthropic-version': '2026-10-21',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      };
+      const b = { ...body };
+      if (withFallbacks) { headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; b.fallbacks = 'default'; }
+      return fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(b) });
+    };
+    onStatus(`Claude está leyendo el tema… (puede tardar 1 o 2 minutos)`);
+    let res;
+    try {
+      res = await send(model.fallbacks);
+      // Si la petición con "fallbacks" no se acepta, se repite sin ella.
+      if (res.status === 400 && model.fallbacks) res = await send(false);
+    } catch (e) {
+      throw new Error('No se pudo conectar con Claude. Comprueba la conexión a internet.');
+    }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = json?.error?.message || `error ${res.status}`;
+      if (res.status === 401) throw new Error('La clave de la API no es válida');
+      if (/credit balance/i.test(msg)) throw new Error('No queda saldo en la cuenta de la API (console.anthropic.com → Billing)');
+      if (res.status === 429) throw new Error('Demasiadas peticiones seguidas. Espera un minuto y vuelve a probar.');
+      throw new Error(`Claude devolvió un error: ${msg}`);
+    }
+    if (json.stop_reason === 'refusal') throw new Error('Claude no ha querido procesar este contenido');
+    if (json.stop_reason === 'max_tokens') throw new Error('La respuesta salió demasiado larga. Prueba con menos fotos.');
+    const out = (json.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
+    const result = parseAiResult(out);
+    const u = json.usage || {};
+    const cost = ((u.input_tokens || 0) * model.price[0] + (u.output_tokens || 0) * model.price[1]) / 1e6;
+    return { ...result, cost };
   }
 
   // ---------- Aprender: esquema, resumen (con audio), fotos y vídeos ----------
@@ -1358,6 +1558,29 @@
         <div id="photoStatus" class="muted small" style="margin-top:6px"></div>
       </div>
 
+      <div class="card ai">
+        <h2 style="margin-top:0">🤖 Preparar el tema con IA (Claude)</h2>
+        <p class="muted small">Claude lee las fotos (o el texto) y hace el <b>esquema</b>, el <b>resumen</b> y las <b>preguntas</b>. Revisa siempre el resultado.</p>
+        ${aiSettings().key ? `
+          <button class="btn primary block" id="aiAuto">✨ Hacerlo automáticamente</button>
+          <div id="aiStatus" class="muted small" style="margin-top:6px"></div>
+          <p class="muted small">Usa tu clave de la API (Zona padres). Cada tema cuesta unos céntimos.</p>
+          <details><summary class="small"><b>O hacerlo con tu app de Claude (sin coste extra con tu plan)</b></summary>` : `
+          <h3 style="margin:12px 0 6px;font-size:1rem">Con tu app de Claude (sin coste extra con tu plan)</h3>`}
+          <ol class="steps small">
+            <li>Pulsa el botón: se copian las instrucciones${deck.photos.length ? ' y se envían las fotos' : ''} a la app de Claude.<br>
+              <button class="btn block" id="aiShare" style="margin-top:6px">📤 ${deck.photos.length ? 'Enviar fotos e instrucciones a Claude' : 'Copiar instrucciones'}</button></li>
+            <li>En Claude, si no aparecen las instrucciones, mantén pulsado el cuadro de texto y elige <b>Pegar</b>. Envía el mensaje.
+              ${deck.photos.length ? '<br>Si las fotos no llegan, adjúntalas desde la galería con el clip 📎.' : ''}
+              <br><a href="https://claude.ai/new" target="_blank" rel="noopener">Abrir Claude</a></li>
+            <li>Cuando Claude responda, pulsa <b>Copiar</b> en su bloque de código, vuelve aquí y pégalo:
+              <textarea id="aiPaste" placeholder="Pega aquí la respuesta de Claude" style="min-height:90px;margin-top:6px"></textarea>
+              <button class="btn primary block" id="aiApply" style="margin-top:6px">Usar la respuesta de Claude</button></li>
+          </ol>
+        ${aiSettings().key ? '</details>' : '<p class="muted small">¿Prefieres que se haga solo? Configura una clave de la API en Zona padres → Inteligencia artificial.</p>'}
+        <div id="aiProposals"></div>
+      </div>
+
       <div class="card">
         <h2 style="margin-top:0">🔤 Texto del tema</h2>
         <p class="muted small">La app puede leer el texto de las fotos (necesita internet la primera vez). Revisa el texto: puede tener algún error si la foto no es buena. También puedes pegar o escribir el texto directamente.</p>
@@ -1505,31 +1728,78 @@
         box.innerHTML = '<p class="muted small" style="margin-top:10px">No he encontrado frases con forma de definición ("X es…", "X: …", "X se llama…"). Puedes crear las tarjetas a mano copiando del texto.</p>';
         return;
       }
-      box.innerHTML = `
-        <h2>Tarjetas propuestas (${props.length})</h2>
-        <p class="muted small">Revisa y corrige cada una. Desmarca las que no quieras.</p>
-        ${props.map((pr, i) => `
-          <div class="proposal">
-            <input type="checkbox" checked data-pi="${i}" aria-label="Usar esta tarjeta">
-            <div class="pq">
-              <input type="text" value="${esc(pr.q)}" data-pq="${i}" aria-label="Pregunta">
-              <textarea rows="2" data-pa="${i}" aria-label="Respuesta">${esc(pr.a)}</textarea>
-            </div>
-          </div>`).join('')}
-        <button class="btn primary block" id="addProps" style="margin-top:10px">Añadir las tarjetas marcadas</button>`;
-      $('#addProps').onclick = () => {
-        let n = 0;
-        $$('[data-pi]').forEach((cb) => {
-          if (!cb.checked) return;
-          const i = cb.dataset.pi;
-          const q = $(`[data-pq="${i}"]`).value.trim(), a = $(`[data-pa="${i}"]`).value.trim();
-          if (q && a) { deck.cards.push(newCard(q, a)); n++; }
-        });
-        if (!n) return toast('No hay ninguna tarjeta marcada');
-        save();
-        viewEdit(id);
-        toast(`${n} tarjetas añadidas`);
+      showProposals(box, props, deck, () => viewEdit(id));
+    };
+
+    // IA: aplicar resultado (esquema, resumen y propuestas de tarjetas)
+    const applyAi = (r) => {
+      const had = deck.lesson?.outline || deck.lesson?.summary;
+      deck.lesson = { outline: r.esquema || deck.lesson?.outline || '', summary: r.resumen || deck.lesson?.summary || '' };
+      save();
+      $('#lo').value = deck.lesson.outline;
+      $('#ls').value = deck.lesson.summary;
+      const box = $('#aiProposals');
+      if (r.tarjetas.length) showProposals(box, r.tarjetas, deck, () => viewEdit(id));
+      else box.innerHTML = '';
+      toast(`Esquema y resumen ${had ? 'sustituidos' : 'listos'}${r.tarjetas.length ? `, y ${r.tarjetas.length} preguntas para revisar` : ''}`);
+      box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    const confirmReplace = () => !(deck.lesson?.outline || deck.lesson?.summary) || confirm('Ya hay esquema o resumen. ¿Sustituirlos por los de Claude?');
+    if ($('#aiAuto')) {
+      $('#aiAuto').onclick = async () => {
+        if (!deck.photos.length && !$('#ocrText').value.trim()) return toast('Añade fotos o el texto del tema primero');
+        if (!confirmReplace()) return;
+        deck.ocrText = $('#ocrText').value;
+        const btn = $('#aiAuto'), st = $('#aiStatus');
+        btn.disabled = true;
+        try {
+          const r = await aiGenerate(deck, (t) => { st.textContent = t; });
+          st.textContent = `Hecho. Coste aproximado: ${r.cost.toLocaleString('es-ES', { maximumFractionDigits: 3 })} $`;
+          applyAi(r);
+        } catch (e) {
+          st.textContent = '';
+          toast(e.message || 'No se pudo completar');
+        } finally {
+          btn.disabled = false;
+        }
       };
+    }
+    $('#aiShare').onclick = async () => {
+      const text = deck.ocrText || $('#ocrText').value;
+      const source = deck.photos.length ? `${deck.photos.length} ${deck.photos.length === 1 ? 'foto' : 'fotos'} (adjuntas)` : 'el texto';
+      const prompt = aiInstructions(deck, source) + (deck.photos.length || !text.trim() ? '' : `\n\nTexto del tema:\n${text}`) + AI_FORMAT;
+      if (!deck.photos.length && !text.trim()) return toast('Añade fotos o el texto del tema primero');
+      const copied = navigator.clipboard ? navigator.clipboard.writeText(prompt).then(() => true, () => false) : Promise.resolve(false);
+      if (deck.photos.length && navigator.canShare) {
+        try {
+          const files = [];
+          for (const [i, pid] of deck.photos.entries()) {
+            const blob = await photoGet(pid).catch(() => null);
+            if (blob) files.push(new File([blob], `tema-foto-${i + 1}.jpg`, { type: 'image/jpeg' }));
+          }
+          if (files.length && navigator.canShare({ files })) {
+            await navigator.share({ files, text: prompt });
+            return;
+          }
+        } catch (e) {
+          if (e && e.name === 'AbortError') return;
+        }
+      }
+      if (await copied) toast('Instrucciones copiadas. Abre Claude, adjunta las fotos y pega.');
+      else {
+        $('#aiPaste').value = prompt;
+        $('#aiPaste').select();
+        toast('No se pudo copiar solo: copia el texto del cuadro y luego bórralo');
+      }
+    };
+    $('#aiApply').onclick = () => {
+      let r;
+      try { r = parseAiResult($('#aiPaste').value); } catch (e) {
+        return toast('No entiendo la respuesta. Copia el bloque de código completo de Claude.');
+      }
+      if (!confirmReplace()) return;
+      $('#aiPaste').value = '';
+      applyAi(r);
     };
 
     // Explicación (esquema y resumen)
