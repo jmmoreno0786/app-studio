@@ -1,6 +1,4 @@
-/* Cursos y temas de ejemplo.
- * El temario real depende de la comunidad autónoma y del libro de texto:
- * estos temas son solo un punto de partida, lo mejor es crear tarjetas con los apuntes del alumno. */
+/* Cursos, operaciones de cálculo mental por nivel, asignaturas y sugerencias de editoriales. */
 window.APP_CONTENT = (() => {
   const COURSES = [
     { id: '1p', label: '1º Primaria', level: 'p12' },
@@ -25,117 +23,6 @@ window.APP_CONTENT = (() => {
     p56: { ops: ['add', 'sub', 'mul', 'div', 'pct', 'frac'], maxOptions: [100, 1000], defaults: { op: 'mul', max: 1000 } },
     eso: { ops: ['add', 'sub', 'mul', 'div', 'int', 'pow', 'sqrt', 'pct', 'frac'], maxOptions: [100, 1000], defaults: { op: 'int', max: 100 } },
     bach: { ops: ['add', 'sub', 'mul', 'div', 'int', 'pow', 'sqrt', 'pct', 'frac'], maxOptions: [100, 1000], defaults: { op: 'int', max: 1000 } },
-  };
-
-  const PRIMARIA = [
-    {
-      name: 'Capitales de Europa', emoji: '🌍', subject: 'Ciencias Sociales',
-      cards: [
-        ['Capital de Francia', 'París'],
-        ['Capital de Italia', 'Roma'],
-        ['Capital de Portugal', 'Lisboa'],
-        ['Capital de Alemania', 'Berlín'],
-        ['Capital de Reino Unido', 'Londres'],
-        ['Capital de Grecia', 'Atenas'],
-      ],
-    },
-    {
-      name: 'Animales', emoji: '🇬🇧', subject: 'Inglés',
-      cards: [
-        ['Perro', 'Dog'],
-        ['Gato', 'Cat'],
-        ['Caballo', 'Horse'],
-        ['Pájaro', 'Bird'],
-        ['Pez', 'Fish'],
-        ['Vaca', 'Cow'],
-      ],
-    },
-  ];
-
-  const ESO1 = [
-    {
-      name: 'El planeta y España', emoji: '🗺️', subject: 'Geografía e Historia',
-      cards: [
-        ['Océano más grande del planeta', 'Pacífico'],
-        ['Océano que separa Europa de América', 'Atlántico'],
-        ['Línea imaginaria que divide la Tierra en hemisferio norte y sur', 'Ecuador'],
-        ['Meridiano que se toma como referencia (meridiano 0)', 'Greenwich'],
-        ['Montaña más alta del mundo', 'Everest'],
-        ['Pico más alto de España', 'Teide'],
-        ['Pico más alto de la península ibérica', 'Mulhacén'],
-        ['Río más largo de la península ibérica', 'Tajo'],
-        ['Río que pasa por Sevilla', 'Guadalquivir'],
-        ['Río que pasa por Zaragoza', 'Ebro'],
-      ],
-    },
-    {
-      name: 'Los seres vivos', emoji: '🔬', subject: 'Biología y Geología',
-      cards: [
-        ['Unidad básica de todos los seres vivos', 'La célula'],
-        ['Las tres funciones vitales', 'Nutrición, relación y reproducción'],
-        ['Célula sin núcleo definido', 'Procariota'],
-        ['Célula con núcleo definido', 'Eucariota'],
-        ['Orgánulo donde se realiza la fotosíntesis', 'Cloroplasto'],
-        ['Orgánulo donde se realiza la respiración celular', 'Mitocondria'],
-        ['Ser vivo que fabrica su propio alimento', 'Autótrofo'],
-        ['Ser vivo que se alimenta de otros seres vivos', 'Heterótrofo'],
-        ['Animales con columna vertebral', 'Vertebrados'],
-        ['Los cinco grupos de vertebrados', 'Peces, anfibios, reptiles, aves y mamíferos'],
-      ],
-    },
-    {
-      name: 'Prehistoria y primeras civilizaciones', emoji: '🏺', subject: 'Geografía e Historia',
-      cards: [
-        ['Etapas de la Prehistoria', 'Paleolítico, Neolítico y Edad de los Metales'],
-        ['Invento que marca el final de la Prehistoria', 'La escritura'],
-        ['Etapa en la que aparecen la agricultura y la ganadería', 'Neolítico'],
-        ['Forma de vida de los grupos humanos del Paleolítico (se desplazaban)', 'Nómada'],
-        ['Cueva de Cantabria famosa por sus pinturas del Paleolítico', 'Altamira'],
-        ['Monumento megalítico formado por una gran piedra clavada en vertical', 'Menhir'],
-        ['Aleación de cobre y estaño', 'Bronce'],
-        ['Ríos entre los que surgió Mesopotamia', 'Tigris y Éufrates'],
-        ['Tipo de escritura de Mesopotamia', 'Cuneiforme'],
-        ['Río junto al que se desarrolló la civilización egipcia', 'Nilo'],
-      ],
-    },
-    {
-      name: 'Gramática y tildes', emoji: '✍️', subject: 'Lengua Castellana y Literatura',
-      cards: [
-        ['Palabra que nombra personas, animales, objetos o ideas', 'Sustantivo'],
-        ['Palabra que acompaña al sustantivo y expresa cualidades', 'Adjetivo'],
-        ['Palabra que expresa acciones, estados o procesos', 'Verbo'],
-        ['Palabra que sustituye al sustantivo', 'Pronombre'],
-        ['Palabra que modifica al verbo e indica lugar, tiempo, modo…', 'Adverbio'],
-        ['Las palabras agudas llevan tilde cuando acaban en…', 'Vocal, n o s'],
-        ['Las palabras llanas llevan tilde cuando NO acaban en…', 'Vocal, n o s'],
-        ['¿Cuándo llevan tilde las palabras esdrújulas?', 'Siempre'],
-        ['Palabra cuya sílaba tónica es la última', 'Aguda'],
-        ['Palabra cuya sílaba tónica es la penúltima', 'Llana'],
-      ],
-    },
-    {
-      name: 'Verbos irregulares', emoji: '🇬🇧', subject: 'Inglés',
-      cards: [
-        ['be (pasado – participio)', 'was/were – been'],
-        ['go (pasado – participio)', 'went – gone'],
-        ['have (pasado – participio)', 'had – had'],
-        ['do (pasado – participio)', 'did – done'],
-        ['see (pasado – participio)', 'saw – seen'],
-        ['eat (pasado – participio)', 'ate – eaten'],
-        ['write (pasado – participio)', 'wrote – written'],
-        ['buy (pasado – participio)', 'bought – bought'],
-        ['take (pasado – participio)', 'took – taken'],
-        ['come (pasado – participio)', 'came – come'],
-        ['make (pasado – participio)', 'made – made'],
-        ['know (pasado – participio)', 'knew – known'],
-      ],
-    },
-  ];
-
-  // Temas de ejemplo por curso. Los cursos sin entrada no traen temas de ejemplo.
-  const STARTER_BY_COURSE = {
-    '3p': PRIMARIA, '4p': PRIMARIA, '5p': PRIMARIA, '6p': PRIMARIA,
-    '1eso': ESO1,
   };
 
   // Asignaturas (con su emoji por defecto).
@@ -168,5 +55,5 @@ window.APP_CONTENT = (() => {
     'Cambridge', 'Macmillan',
   ];
 
-  return { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE, SUBJECTS, PUBLISHERS };
+  return { COURSES, MATH_BY_LEVEL, SUBJECTS, PUBLISHERS };
 })();

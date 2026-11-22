@@ -4,7 +4,7 @@
 (() => {
   'use strict';
 
-  const { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE, SUBJECTS, PUBLISHERS } = window.APP_CONTENT;
+  const { COURSES, MATH_BY_LEVEL, SUBJECTS, PUBLISHERS } = window.APP_CONTENT;
   const STORAGE_KEY = 'app-studio-v2';
   const LEGACY_KEY = 'app-studio-v1';
   const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14]; // caja 1..5 (repaso espaciado tipo Leitner)
@@ -90,19 +90,23 @@
   function db() {
     if (!dbPromise) {
       dbPromise = new Promise((resolve, reject) => {
-        const req = indexedDB.open('app-studio', 1);
-        req.onupgradeneeded = () => req.result.createObjectStore('photos');
+        const req = indexedDB.open('app-studio', 2);
+        req.onupgradeneeded = () => {
+          const d = req.result;
+          if (!d.objectStoreNames.contains('photos')) d.createObjectStore('photos');
+          if (!d.objectStoreNames.contains('books')) d.createObjectStore('books');
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => reject(req.error);
       });
     }
     return dbPromise;
   }
-  async function idb(mode, fn) {
+  async function idb(mode, fn, store = 'photos') {
     const d = await db();
     return new Promise((resolve, reject) => {
-      const tx = d.transaction('photos', mode);
-      const req = fn(tx.objectStore('photos'));
+      const tx = d.transaction(store, mode);
+      const req = fn(tx.objectStore(store));
       tx.oncomplete = () => resolve(req?.result);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -111,6 +115,9 @@
   const photoPut = (id, blob) => idb('readwrite', (s) => s.put(blob, id));
   const photoGet = (id) => idb('readonly', (s) => s.get(id));
   const photoDel = (id) => idb('readwrite', (s) => s.delete(id));
+  const bookPut = (id, blob) => idb('readwrite', (s) => s.put(blob, id), 'books');
+  const bookGet = (id) => idb('readonly', (s) => s.get(id), 'books');
+  const bookDel = (id) => idb('readwrite', (s) => s.delete(id), 'books');
   const urlCache = new Map();
   async function photoUrl(id) {
     if (urlCache.has(id)) return urlCache.get(id);
@@ -127,12 +134,12 @@
     }
   }
   // Reduce la foto para que ocupe poco pero se pueda leer bien.
-  function compressImage(file, maxSide = 1800, quality = 0.85) {
+  function compressImage(file, maxW = 1600, maxH = 2600, quality = 0.85) {
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const scale = Math.min(1, maxW / img.naturalWidth, maxH / img.naturalHeight);
         const canvas = document.createElement('canvas');
         canvas.width = Math.round(img.naturalWidth * scale);
         canvas.height = Math.round(img.naturalHeight * scale);
@@ -162,13 +169,8 @@
     id: uid(), name: '', emoji: '📘', course: '', subject: '', publisher: '', unit: '',
     cards: [], photos: [], ocrText: '', lesson: { outline: '', summary: '' }, videos: [], ...fields,
   });
-  const starterDecks = (courseId) => (STARTER_BY_COURSE[courseId] || []).map((d) => newDeck({
-    name: d.name, emoji: d.emoji, subject: d.subject || '', course: courseId,
-    cards: d.cards.map(([q, a]) => newCard(q, a)),
-  }));
-  const newProfile = (name, course, withStarter) => ({
-    id: uid(), name, course, points: 0, streak: 0, lastStudy: null, history: {},
-    decks: withStarter ? starterDecks(course) : [],
+  const newProfile = (name, course) => ({
+    id: uid(), name, course, points: 0, streak: 0, lastStudy: null, history: {}, decks: [], books: [],
   });
 
   // Convierte el formato antiguo (un solo usuario) al nuevo (varios perfiles).
@@ -224,55 +226,6 @@
     card.due = addDays(todayStr(), BOX_INTERVAL_DAYS[card.box - 1]);
   }
 
-  // ---------- Compartir temas (archivo .json sin fotos) ----------
-  async function shareDeck(deck) {
-    const payload = {
-      type: 'app-studio-tema', version: 1,
-      tema: {
-        name: deck.name, emoji: deck.emoji, course: deck.course, subject: deck.subject,
-        publisher: deck.publisher, unit: deck.unit, cards: deck.cards.map((c) => ({ q: c.q, a: c.a })),
-        lesson: deck.lesson || { outline: '', summary: '' }, videos: (deck.videos || []).map((v) => ({ yt: v.yt, title: v.title })),
-      },
-    };
-    const filename = `${deck.unit ? "" : "tema-"}${slug(deckTitle(deck))}.json`;
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    try {
-      const file = new File([blob], filename, { type: 'application/json' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: deckTitle(deck) });
-        return;
-      }
-    } catch (e) {
-      if (e && e.name === 'AbortError') return;
-    }
-    downloadBlob(blob, filename);
-  }
-  function importDeckFile(file, onDone) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (parsed && parsed.profiles) return toast('Eso es una copia completa: cárgala en Zona padres');
-        const t = parsed && parsed.type === 'app-studio-tema' ? parsed.tema : null;
-        if (!t || !t.name || !Array.isArray(t.cards)) throw new Error('formato');
-        const deck = newDeck({
-          name: String(t.name), emoji: String(t.emoji || subjectEmoji(t.subject)), course: String(t.course || ''),
-          subject: String(t.subject || ''), publisher: String(t.publisher || ''), unit: String(t.unit || ''),
-          cards: t.cards.filter((c) => c && c.q && c.a).map((c) => newCard(String(c.q), String(c.a))),
-          lesson: { outline: String(t.lesson?.outline || ''), summary: String(t.lesson?.summary || '') },
-          videos: (Array.isArray(t.videos) ? t.videos : []).filter((v) => v && /^[\w-]{11}$/.test(v.yt)).map((v) => ({ id: uid(), yt: v.yt, title: String(v.title || 'Vídeo') })),
-        });
-        P().decks.push(deck);
-        save();
-        toast(`Tema importado (${deck.cards.length} tarjetas)`);
-        onDone(deck);
-      } catch (err) {
-        toast('Ese archivo no es un tema válido');
-      }
-    };
-    reader.readAsText(file);
-  }
-
   // ---------- UI común ----------
   const app = $('#app');
   let toastTimer;
@@ -290,7 +243,7 @@
     $('#score').innerHTML = `
       <span title="Puntos">⭐ ${p.points}</span>
       <span title="Días seguidos estudiando">🔥 ${streakActive ? p.streak : 0}</span>
-      <a class="who" href="#/profiles" title="Cambiar de persona">👤 ${esc(p.name)}</a>`;
+      <span class="who">👤 ${esc(p.name)}</span>`;
   }
   const cheer = () => pick(['¡Genial!', '¡Muy bien!', '¡Correcto!', '¡Eres un crack!', '¡Perfecto!']);
   const courseOptions = (selected, placeholder) =>
@@ -312,11 +265,9 @@
 
   // ---------- Bienvenida / perfiles ----------
   function viewWelcome() {
-    const first = data.profiles.length === 0;
     app.innerHTML = `
-      ${first ? '' : '<a class="back" href="#/profiles">← Volver</a>'}
       <div class="center"><div class="huge">📚</div></div>
-      <h1 class="center">${first ? '¡Bienvenido/a a App Studio!' : 'Nueva persona'}</h1>
+      <h1 class="center">¡Bienvenido a App Studio!</h1>
       <p class="center muted">Antes de empezar, cuéntanos un poco sobre quién va a estudiar.</p>
       <form class="card" id="f">
         <label for="nm">¿Cómo te llamas?</label>
@@ -326,17 +277,15 @@
           <option value="" disabled selected>Elige tu curso</option>
           ${courseOptions(null)}
         </select>
-        <label class="check" id="stWrap" hidden><input type="checkbox" id="st" checked> Añadir temas de ejemplo de mi curso</label>
         <button class="btn primary block" style="margin-top:16px">Empezar</button>
       </form>
     `;
     const sel = $('#cu');
-    sel.onchange = () => { $('#stWrap').hidden = !STARTER_BY_COURSE[sel.value]; };
     $('#f').onsubmit = (e) => {
       e.preventDefault();
       const name = $('#nm').value.trim();
       if (!name || !sel.value) return;
-      const prof = newProfile(name, sel.value, $('#st').checked && !!STARTER_BY_COURSE[sel.value]);
+      const prof = newProfile(name, sel.value);
       data.profiles.push(prof);
       data.activeId = prof.id;
       resetMathCfg();
@@ -344,29 +293,6 @@
       save();
       go('#/');
     };
-  }
-
-  function viewProfiles() {
-    app.innerHTML = `
-      <a class="back" href="#/">← Inicio</a>
-      <h1>¿Quién va a estudiar?</h1>
-      <div class="grid">
-        ${data.profiles.map((p) => `
-          <button class="card deck profile ${p.id === data.activeId ? 'active' : ''}" data-id="${p.id}">
-            <div class="emoji">👤</div>
-            <div class="name">${esc(p.name)}</div>
-            <div class="muted small">${esc(courseById(p.course)?.label || 'Sin curso')} · ⭐ ${p.points}</div>
-          </button>`).join('')}
-        <a class="card deck" href="#/welcome">
-          <div class="emoji">➕</div>
-          <div class="name">Añadir persona</div>
-          <div class="muted small">Cada una con su progreso</div>
-        </a>
-      </div>
-    `;
-    $$('.profile').forEach((b) => {
-      b.onclick = () => { data.activeId = b.dataset.id; resetMathCfg(); resetFilters(); save(); go('#/'); };
-    });
   }
 
   function viewChooseCourse() {
@@ -408,6 +334,7 @@
 
       <div class="row" style="margin-top:16px">
         <a class="btn" href="#/search">🔎 Buscar tema</a>
+        <a class="btn" href="#/books">📚 Mis libros</a>
         <a class="btn primary" href="#/new">➕ Nuevo tema</a>
       </div>
 
@@ -449,9 +376,7 @@
       <div id="results"></div>
       <div class="row" style="margin-top:8px">
         <a class="btn primary" href="#/new">➕ Nuevo tema</a>
-        <label class="btn" style="margin:0">📥 Importar tema<input type="file" id="impDeck" accept="application/json,.json" hidden></label>
       </div>
-      <p class="muted small" style="margin-top:8px">¿Alguien te ha pasado un tema? Usa "Importar tema" con el archivo <code>.json</code> que te hayan enviado.</p>
     `;
     const renderResults = () => {
       const q = normalize(filters.q);
@@ -469,10 +394,6 @@
     $('#fc').onchange = (e) => { filters.course = e.target.value; renderResults(); };
     $('#fs').onchange = (e) => { filters.subject = e.target.value; renderResults(); };
     $('#fp').onchange = (e) => { filters.publisher = e.target.value; renderResults(); };
-    $('#impDeck').onchange = (e) => {
-      const f = e.target.files[0];
-      if (f) importDeckFile(f, (deck) => go(`#/deck/${deck.id}`));
-    };
     renderResults();
   }
 
@@ -534,7 +455,7 @@
     app.innerHTML = `
       <a class="back" href="#/">← Inicio</a>
       <h1 style="margin-bottom:2px">${esc(deck.emoji || '📘')} ${esc(deckTitle(deck))}</h1>
-      <p class="muted">${esc(deckMeta(deck))}${deckMeta(deck) ? '<br>' : ''}${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
+      <p class="muted">${esc(deckMeta(deck))}${deckMeta(deck) ? '<br>' : ''}${deckBookInfo(deck)}${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
       ${hasLesson(deck) ? `
       <div class="card learn">
         <h2 style="margin-top:0">📖 Aprender</h2>
@@ -916,12 +837,11 @@
     const last7 = days.slice(-7);
     const sum7 = last7.reduce((a, x) => ({ c: a.c + x.correct, t: a.t + x.total }), { c: 0, t: 0 });
     const daysStudied = last7.filter((x) => x.total > 0).length;
-    const hasStarter = !!STARTER_BY_COURSE[p.course];
 
     app.innerHTML = `
       <a class="back" href="#/">← Inicio</a>
       <h1>👨‍👩‍👦 Zona padres</h1>
-      <p class="muted">Perfil: <b>${esc(p.name)}</b> · ${esc(courseById(p.course)?.label || 'sin curso')} · <a href="#/profiles">cambiar</a></p>
+      <p class="muted"><b>${esc(p.name)}</b> · ${esc(courseById(p.course)?.label || 'sin curso')}</p>
 
       <div class="card">
         <h2 style="margin-top:0">Progreso (últimos 14 días)</h2>
@@ -944,18 +864,17 @@
         </ul>
         <div class="row" style="margin-top:12px">
           <a class="btn primary" href="#/new">➕ Nuevo tema</a>
-          <a class="btn" href="#/search">🔎 Buscar / importar</a>
+          <a class="btn" href="#/books">📚 Mis libros</a>
         </div>
-        ${hasStarter ? '<button class="btn ghost block" id="addStarter" style="margin-top:10px">➕ Añadir temas de ejemplo de este curso</button>' : ''}
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">Ajustes de ${esc(p.name)}</h2>
+        <h2 style="margin-top:0">Ajustes</h2>
         <label for="nm">Nombre</label>
         <input type="text" id="nm" value="${esc(p.name)}" maxlength="30">
         <label for="cu">Curso</label>
         <select id="cu">${courseOptions(p.course)}</select>
-        <button class="btn ghost block" id="delProfile" style="margin-top:12px;color:var(--bad)">Borrar este perfil</button>
+        <button class="btn ghost block" id="delProfile" style="margin-top:12px;color:var(--bad)">Borrar todos los datos de la app</button>
       </div>
 
       <div class="card">
@@ -974,7 +893,7 @@
 
       <div class="card">
         <h2 style="margin-top:0">Copia de seguridad</h2>
-        <p class="muted small">Los datos de todos los perfiles se guardan solo en este navegador. Descarga una copia para pasarlos a otro dispositivo o por si se borra el navegador.<br><b>Las fotos no van en la copia</b> (ocuparía demasiado): se quedan en este dispositivo.</p>
+        <p class="muted small">Los datos de todos los perfiles se guardan solo en este navegador. Descarga una copia para pasarlos a otro dispositivo o por si se borra el navegador.<br><b>Las fotos y los libros en PDF no van en la copia</b> (ocuparían demasiado): se quedan en este dispositivo.</p>
         <div class="row">
           <button class="btn" id="exp">⬇️ Descargar copia</button>
           <label class="btn" style="margin:0">⬆️ Cargar copia<input type="file" id="imp" accept="application/json,.json" hidden></label>
@@ -982,17 +901,6 @@
       </div>
     `;
 
-    if (hasStarter) {
-      $('#addStarter').onclick = () => {
-        const existing = new Set(p.decks.map((d) => d.name));
-        const toAdd = starterDecks(p.course).filter((d) => !existing.has(d.name));
-        if (!toAdd.length) return toast('Ya tienes todos los temas de ejemplo');
-        p.decks.push(...toAdd);
-        save();
-        viewParents();
-        toast(`${toAdd.length} ${toAdd.length === 1 ? 'tema añadido' : 'temas añadidos'}`);
-      };
-    }
     $('#aiSave').onclick = () => {
       const cur = aiSettings();
       const key = $('#aik').value.trim() || cur.key || '';
@@ -1012,12 +920,15 @@
     $('#nm').onchange = (e) => { const v = e.target.value.trim(); if (v) { p.name = v; save(); toast('Guardado'); } };
     $('#cu').onchange = (e) => { p.course = e.target.value; resetMathCfg(); save(); viewParents(); toast('Curso cambiado'); };
     $('#delProfile').onclick = async () => {
-      if (!confirm(`¿Borrar el perfil de ${p.name} con todos sus temas, fotos y progreso?`)) return;
-      await deletePhotos(p.decks.flatMap((d) => d.photos || []));
-      data.profiles = data.profiles.filter((x) => x.id !== p.id);
-      data.activeId = data.profiles[0]?.id || null;
+      if (!confirm('¿Borrar TODOS los datos: temas, fotos, libros y progreso? No se puede deshacer.')) return;
+      if (!confirm('¿Seguro? Si no tienes una copia de seguridad, se perderá todo.')) return;
+      for (const prof of data.profiles) {
+        await deletePhotos(prof.decks.flatMap((d) => d.photos || []));
+        for (const b of prof.books || []) await bookDel(b.id).catch(() => {});
+      }
+      data = { version: 2, activeId: null, profiles: [] };
       save();
-      go(data.activeId ? '#/profiles' : '#/welcome');
+      go('#/welcome');
     };
     $('#exp').onclick = () => {
       downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `app-studio-copia-${todayStr()}.json`);
@@ -1029,7 +940,6 @@
       reader.onload = () => {
         try {
           const raw = JSON.parse(reader.result);
-          if (raw && raw.type === 'app-studio-tema') return toast('Eso es un tema suelto: impórtalo desde "Buscar tema"');
           const parsed = migrate(raw);
           if (!parsed || !parsed.profiles.length) throw new Error('formato');
           if (!confirm('Esto sustituirá todos los datos actuales por los de la copia. ¿Seguir?')) return;
@@ -1037,12 +947,388 @@
           if (!P()) data.activeId = data.profiles[0].id;
           save();
           toast('Copia cargada');
-          go('#/profiles');
+          go('#/');
         } catch (err) {
           toast('Ese archivo no es una copia válida');
         }
       };
       reader.readAsText(file);
+    };
+  }
+
+  // ---------- Recortar fotos/capturas (quitar barras del móvil, márgenes…) ----------
+  function cropBlob(blob, c) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        const W = img.naturalWidth, H = img.naturalHeight;
+        const x = Math.round(W * c.left / 100), y = Math.round(H * c.top / 100);
+        const w = Math.max(10, Math.round(W * (100 - c.left - c.right) / 100));
+        const h = Math.max(10, Math.round(H * (100 - c.top - c.bottom) / 100));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, x, y, w, h, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/jpeg', 0.9);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('imagen')); };
+      img.src = url;
+    });
+  }
+
+  function openCropPanel(deck, panel, onDone) {
+    const c = { top: 0, bottom: 0, left: 0, right: 0 };
+    let current = 0;
+    const SIDES = [['top', 'Arriba'], ['bottom', 'Abajo'], ['left', 'Izquierda'], ['right', 'Derecha']];
+    panel.innerHTML = `
+      <div class="crop">
+        <h3 style="margin:14px 0 6px;font-size:1rem">✂️ Recortar</h3>
+        <p class="muted small">Mueve las barras para quitar lo que sobra (barra de estado, botones del visor del libro, márgenes…). La zona oscura se elimina.</p>
+        ${deck.photos.length > 1 ? `<div class="chips" id="cropPick">${deck.photos.map((_, i) => `<button class="chip ${i === 0 ? 'on' : ''}" data-ci="${i}">${i + 1}</button>`).join('')}</div>` : ''}
+        <div class="crop-box"><img id="cropImg" data-photo="${deck.photos[0]}" alt="Vista previa">
+          <div class="shade" data-s="top"></div><div class="shade" data-s="bottom"></div><div class="shade" data-s="left"></div><div class="shade" data-s="right"></div>
+        </div>
+        ${SIDES.map(([k, l]) => `<label class="slider">${l} <span id="v-${k}">0 %</span><input type="range" min="0" max="45" value="0" data-side="${k}"></label>`).join('')}
+        ${deck.photos.length > 1 ? '<label class="check"><input type="checkbox" id="cropAll" checked> Aplicar el mismo recorte a todas las fotos</label>' : ''}
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="cropDo">Recortar</button>
+          <button class="btn" id="cropCancel">Cancelar</button>
+        </div>
+      </div>`;
+    hydratePhotos(panel);
+    const paint = () => {
+      const sh = (k) => $(`.shade[data-s="${k}"]`, panel);
+      sh('top').style.cssText = `top:0;left:0;right:0;height:${c.top}%`;
+      sh('bottom').style.cssText = `bottom:0;left:0;right:0;height:${c.bottom}%`;
+      sh('left').style.cssText = `top:${c.top}%;bottom:${c.bottom}%;left:0;width:${c.left}%`;
+      sh('right').style.cssText = `top:${c.top}%;bottom:${c.bottom}%;right:0;width:${c.right}%`;
+      SIDES.forEach(([k]) => { $(`#v-${k}`, panel).textContent = `${c[k]} %`; });
+    };
+    $$('[data-side]', panel).forEach((r) => { r.oninput = () => { c[r.dataset.side] = Number(r.value); paint(); }; });
+    $$('[data-ci]', panel).forEach((b) => {
+      b.onclick = async () => {
+        current = Number(b.dataset.ci);
+        $$('[data-ci]', panel).forEach((x) => x.classList.toggle('on', x === b));
+        const url = await photoUrl(deck.photos[current]);
+        if (url) $('#cropImg', panel).src = url;
+      };
+    });
+    $('#cropCancel', panel).onclick = () => { panel.innerHTML = ''; };
+    $('#cropDo', panel).onclick = async () => {
+      if (!c.top && !c.bottom && !c.left && !c.right) return toast('Mueve alguna barra para recortar');
+      const all = $('#cropAll', panel)?.checked;
+      const targets = all ? deck.photos.map((_, i) => i) : [current];
+      $('#cropDo', panel).disabled = true;
+      let ok = 0;
+      for (const i of targets) {
+        $('#photoStatus').textContent = `Recortando ${ok + 1} de ${targets.length}…`;
+        try {
+          const old = deck.photos[i];
+          const blob = await photoGet(old);
+          if (!blob) continue;
+          const nid = uid();
+          await photoPut(nid, await cropBlob(blob, c));
+          deck.photos[i] = nid;
+          await deletePhotos([old]);
+          ok++;
+        } catch (e) { /* se deja la foto como estaba */ }
+      }
+      save();
+      onDone();
+      toast(`${ok} ${ok === 1 ? 'foto recortada' : 'fotos recortadas'}`);
+    };
+    paint();
+  }
+
+  // ---------- Libros en PDF (uso personal: se guardan solo en este dispositivo) ----------
+  const PDFJS = {
+    lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.min.mjs',
+    worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.7.284/build/pdf.worker.min.mjs',
+  };
+  const MAX_TOPIC_PAGES = 40;
+  let pdfjsPromise;
+  function loadPdfjs() {
+    if (!pdfjsPromise) {
+      pdfjsPromise = import(PDFJS.lib).then((lib) => { lib.GlobalWorkerOptions.workerSrc = PDFJS.worker; return lib; });
+      pdfjsPromise.catch(() => { pdfjsPromise = null; });
+    }
+    return pdfjsPromise;
+  }
+  async function openPdf(blob) {
+    const lib = await loadPdfjs();
+    const task = lib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
+    task.onPassword = (update, reason) => {
+      const pw = prompt(reason === 2 ? 'Contraseña incorrecta. Vuelve a escribirla:' : 'Este PDF tiene contraseña. Escríbela:');
+      if (pw === null) task.destroy(); else update(pw);
+    };
+    return task.promise;
+  }
+  // Temas del índice (marcadores) del PDF, con su página.
+  async function readOutline(pdf) {
+    const out = [];
+    let items = null;
+    try { items = await pdf.getOutline(); } catch (e) { return out; }
+    const walk = async (list, level) => {
+      for (const it of list || []) {
+        try {
+          let dest = it.dest;
+          if (typeof dest === 'string') dest = await pdf.getDestination(dest);
+          if (Array.isArray(dest) && dest[0] != null) {
+            const idx = typeof dest[0] === 'number' ? dest[0] : await pdf.getPageIndex(dest[0]);
+            out.push({ title: String(it.title || '').trim(), page: idx + 1, level });
+          }
+        } catch (e) { /* entrada sin destino */ }
+        if (level < 1 && it.items?.length) await walk(it.items, level + 1);
+      }
+    };
+    await walk(items, 0);
+    return out.filter((o) => o.title);
+  }
+  // Rango de páginas de cada entrada del índice: hasta la siguiente entrada de su mismo nivel o superior.
+  function outlineRanges(book) {
+    const o = (book.outline || []).slice().sort((a, b) => a.page - b.page);
+    return o.map((e, i) => {
+      const next = o.slice(i + 1).find((x) => x.level <= e.level && x.page > e.page);
+      return { ...e, from: e.page, to: next ? Math.max(e.page, next.page - 1) : book.pages };
+    });
+  }
+  function textFromContent(tc) {
+    let out = '', lastY = null;
+    for (const it of tc.items) {
+      if (!('str' in it)) continue;
+      const y = it.transform[5], h = it.height || 10;
+      if (lastY !== null && lastY - y > h * 1.8 && !out.endsWith('\n\n')) out += out.endsWith('\n') ? '\n' : '\n\n';
+      out += it.str;
+      if (it.hasEOL) out += '\n';
+      lastY = y;
+    }
+    // Quita las líneas que son solo el número de página.
+    return out.replace(/[ \t]+\n/g, '\n').split('\n').filter((l) => !/^\s*\d{1,4}\s*$/.test(l)).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  async function renderPage(pdf, n, width) {
+    const page = await pdf.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: Math.min(3, width / base.width) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+    return { page, blob };
+  }
+  const deckBookInfo = (deck) => {
+    const book = deck.bookId && P().books?.find((b) => b.id === deck.bookId);
+    return book && deck.pages ? `📚 ${esc(book.name)}, págs. ${deck.pages[0]}–${deck.pages[1]}<br>` : '';
+  };
+
+  function viewBooks() {
+    const p = P();
+    p.books = p.books || [];
+    app.innerHTML = `
+      <a class="back" href="#/">← Inicio</a>
+      <h1>📚 Mis libros</h1>
+      <p class="muted small">Sube el libro digital en PDF y crea cada tema eligiendo sus páginas. El libro se guarda <b>solo en este dispositivo</b> y no se comparte con nadie.</p>
+      ${p.books.map((b) => `
+        <a class="card deck" href="#/book/${b.id}" style="margin-bottom:12px">
+          <div class="name">${esc(subjectEmoji(b.subject))} ${esc(b.name)}</div>
+          <div class="muted small">${esc([b.subject, b.publisher, courseById(b.course)?.label].filter(Boolean).join(' · '))}</div>
+          <div class="muted small">${b.pages} páginas · ${p.decks.filter((d) => d.bookId === b.id).length} temas creados</div>
+        </a>`).join('') || '<div class="card muted">Todavía no has subido ningún libro.</div>'}
+      <label class="btn primary block" style="margin:0">📥 Subir libro en PDF<input type="file" id="pdfIn" accept="application/pdf,.pdf" hidden></label>
+      <div id="pdfStatus" class="muted small" style="margin-top:8px"></div>
+      <p class="muted small">¿El libro solo se puede ver en la web o app de la editorial? Haz capturas de pantalla de las páginas y súbelas en "Nuevo tema" → "Añadir fotos o capturas".</p>
+    `;
+    $('#pdfIn').onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const st = $('#pdfStatus');
+      try {
+        st.textContent = 'Abriendo el PDF… (la primera vez descarga el lector, necesita internet)';
+        const pdf = await openPdf(file);
+        st.textContent = 'Leyendo el índice…';
+        const outline = await readOutline(pdf);
+        const book = {
+          id: uid(), name: file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() || 'Libro',
+          subject: '', publisher: '', course: p.course, pages: pdf.numPages, outline,
+        };
+        await pdf.destroy();
+        st.textContent = 'Guardando el libro en este dispositivo…';
+        await bookPut(book.id, file);
+        p.books.push(book);
+        save();
+        go(`#/book/${book.id}`);
+      } catch (err) {
+        st.textContent = '';
+        toast(/password|contraseña/i.test(String(err?.name || err?.message)) ? 'No se pudo abrir: falta la contraseña del PDF' : 'No se pudo abrir el PDF. Comprueba que es un PDF y que tienes internet.');
+      }
+    };
+  }
+
+  function viewBook(id) {
+    const p = P();
+    const book = (p.books || []).find((b) => b.id === id);
+    if (!book) return go('#/books');
+    const made = (from, to) => p.decks.find((d) => d.bookId === book.id && d.pages && d.pages[0] === from && d.pages[1] === to);
+    const ranges = outlineRanges(book);
+    app.innerHTML = `
+      <a class="back" href="#/books">← Mis libros</a>
+      <h1 style="margin-bottom:2px">📚 ${esc(book.name)}</h1>
+      <p class="muted">${esc([book.subject, book.publisher, courseById(book.course)?.label].filter(Boolean).join(' · '))}${book.subject || book.publisher ? '<br>' : ''}${book.pages} páginas</p>
+
+      <details class="card" ${book.subject ? '' : 'open'}>
+        <summary><b>📋 Datos del libro</b></summary>
+        <form id="bm">
+          <label for="bn">Nombre</label><input type="text" id="bn" value="${esc(book.name)}" maxlength="80" required>
+          <div class="filters">
+            <div><label for="bs">Asignatura</label><select id="bs">${subjectOptions(book.subject, 'Elige…')}</select></div>
+            <div><label for="bc">Curso</label><select id="bc">${courseOptions(book.course, 'Elige…')}</select></div>
+            <div><label for="bp">Editorial</label><input type="text" id="bp" list="publishers" value="${esc(book.publisher)}" maxlength="40"></div>
+          </div>
+          ${publisherDatalist()}
+          <button class="btn primary block" style="margin-top:12px">Guardar</button>
+        </form>
+        <p class="muted small">Los temas que crees de este libro tendrán esta asignatura, curso y editorial.</p>
+      </details>
+
+      ${ranges.length ? `
+      <div class="card">
+        <h2 style="margin-top:0">📑 Temas del índice</h2>
+        <p class="muted small">Sacados del índice del PDF. Pulsa "Crear" para crear el tema con sus páginas.</p>
+        <ul class="list">
+          ${ranges.map((r, i) => {
+            const d = made(r.from, r.to);
+            return `<li class="${r.level ? 'sub-item' : ''}">
+              <span class="qa">${esc(r.title)} <span class="muted small">· págs. ${r.from}–${r.to}</span></span>
+              ${d ? `<a class="btn" href="#/deck/${d.id}">✓ Abrir</a>` : `<button class="btn" data-mk="${i}">Crear</button>`}
+            </li>`;
+          }).join('')}
+        </ul>
+      </div>` : ''}
+
+      <div class="card">
+        <h2 style="margin-top:0">✂️ Crear un tema eligiendo páginas</h2>
+        ${ranges.length ? '' : '<p class="muted small">Este PDF no tiene índice con marcadores: elige las páginas a mano.</p>'}
+        <form id="rg">
+          <div class="filters">
+            <div><label for="pf">Desde la página</label><input type="number" id="pf" min="1" max="${book.pages}" value="1" required></div>
+            <div><label for="pt">Hasta la página</label><input type="number" id="pt" min="1" max="${book.pages}" value="${Math.min(book.pages, 10)}" required></div>
+          </div>
+          <p class="muted small">Son las páginas del archivo PDF, que pueden no coincidir con el número impreso en el libro: mira la vista previa.</p>
+          <div class="previews"><figure><div id="pvf" class="pv"></div><figcaption>Primera</figcaption></figure><figure><div id="pvt" class="pv"></div><figcaption>Última</figcaption></figure></div>
+          <div class="filters">
+            <div><label for="rt">Título del tema</label><input type="text" id="rt" required maxlength="80" placeholder="Ej.: La célula"></div>
+            <div><label for="ru">Nº de tema</label><input type="text" inputmode="numeric" id="ru" maxlength="5" placeholder="Ej.: 3"></div>
+          </div>
+          <button class="btn primary block" style="margin-top:12px">Crear tema</button>
+        </form>
+        <div id="bkStatus" class="muted small" style="margin-top:8px"></div>
+      </div>
+
+      <button class="btn ghost block" id="delBook" style="color:var(--bad)">Borrar libro de este dispositivo</button>
+      <p class="muted small">Borrar el libro no borra los temas que ya has creado.</p>
+    `;
+
+    $('#bm').onsubmit = (e) => {
+      e.preventDefault();
+      book.name = $('#bn').value.trim() || book.name;
+      book.subject = $('#bs').value;
+      book.course = $('#bc').value;
+      book.publisher = $('#bp').value.trim();
+      save();
+      viewBook(id);
+      toast('Datos del libro guardados');
+    };
+
+    let pdfP = null;
+    const getPdf = async () => {
+      if (!pdfP) {
+        pdfP = (async () => {
+          const blob = await bookGet(book.id);
+          if (!blob) throw new Error('missing');
+          return openPdf(blob);
+        })();
+        pdfP.catch(() => { pdfP = null; });
+      }
+      return pdfP;
+    };
+    // Vista previa de la primera y la última página elegidas.
+    let pvTimer;
+    const preview = () => {
+      clearTimeout(pvTimer);
+      pvTimer = setTimeout(async () => {
+        try {
+          const pdf = await getPdf();
+          for (const [inp, box] of [['#pf', '#pvf'], ['#pt', '#pvt']]) {
+            const n = Math.min(book.pages, Math.max(1, Number($(inp).value) || 1));
+            const { blob } = await renderPage(pdf, n, 300);
+            const el = $(box);
+            if (!el) return;
+            if (el.dataset.url) URL.revokeObjectURL(el.dataset.url);
+            el.dataset.url = URL.createObjectURL(blob);
+            el.innerHTML = `<img src="${el.dataset.url}" alt="Página ${n}"><span>pág. ${n}</span>`;
+          }
+        } catch (e) {
+          const el = $('#pvf');
+          if (el) el.textContent = 'Sin vista previa (¿sin internet?)';
+        }
+      }, 350);
+    };
+    $('#pf').oninput = preview;
+    $('#pt').oninput = preview;
+    preview();
+
+    const create = async (from, to, title, unit) => {
+      if (!(from >= 1 && to <= book.pages && from <= to)) return toast(`Elige páginas entre 1 y ${book.pages}`);
+      if (to - from + 1 > MAX_TOPIC_PAGES) return toast(`Como mucho ${MAX_TOPIC_PAGES} páginas por tema`);
+      const st = $('#bkStatus');
+      $$('#app button').forEach((b) => { b.disabled = true; });
+      const photos = [], texts = [];
+      try {
+        const pdf = await getPdf();
+        for (let n = from; n <= to; n++) {
+          st.textContent = `Preparando página ${n - from + 1} de ${to - from + 1}…`;
+          const { page, blob } = await renderPage(pdf, n, 1600);
+          const pid = uid();
+          await photoPut(pid, blob);
+          photos.push(pid);
+          texts.push(textFromContent(await page.getTextContent()));
+          page.cleanup();
+        }
+        const m = !unit && title.match(/^\s*(?:tema|unidad)\s+(\d+)[.:\s-]*(.*)$/i);
+        const deck = newDeck({
+          name: (m ? m[2] : title).trim() || title, unit: unit || (m ? m[1] : ''),
+          subject: book.subject, course: book.course, publisher: book.publisher, emoji: subjectEmoji(book.subject),
+          photos, ocrText: texts.filter(Boolean).join('\n\n'), bookId: book.id, pages: [from, to],
+        });
+        p.decks.push(deck);
+        save();
+        toast('Tema creado. Ahora prepara el esquema, el resumen y las preguntas.');
+        go(`#/edit/${deck.id}`);
+      } catch (e) {
+        await deletePhotos(photos);
+        st.textContent = '';
+        $$('#app button').forEach((b) => { b.disabled = false; });
+        toast('No se pudo crear el tema desde el PDF');
+      }
+    };
+    $$('[data-mk]').forEach((b) => {
+      b.onclick = () => { const r = ranges[Number(b.dataset.mk)]; create(r.from, r.to, r.title, ''); };
+    });
+    $('#rg').onsubmit = (e) => {
+      e.preventDefault();
+      create(Number($('#pf').value), Number($('#pt').value), $('#rt').value.trim(), $('#ru').value.trim());
+    };
+    $('#delBook').onclick = async () => {
+      if (!confirm(`¿Borrar "${book.name}" de este dispositivo?`)) return;
+      await bookDel(book.id).catch(() => {});
+      p.books = p.books.filter((b) => b.id !== book.id);
+      save();
+      go('#/books');
     };
   }
 
@@ -1545,17 +1831,27 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
       </details>
 
       <div class="card">
-        <h2 style="margin-top:0">📷 Fotos del tema</h2>
-        <p class="muted small">Haz fotos de las páginas del libro o de los apuntes: con buena luz, la página recta y sin sombras. Puedes subir varias a la vez.</p>
+        <h2 style="margin-top:0">📷 Fotos y capturas del tema</h2>
+        <p class="muted small">Fotos de las páginas (con buena luz y la página recta) o <b>capturas de pantalla</b> del libro digital. Puedes subir varias a la vez: se ordenan por la hora en que se hicieron.</p>
+        ${deck.bookId ? `<p class="muted small">📚 Páginas importadas del libro en PDF.</p>` : ''}
         <div class="thumbs">
           ${deck.photos.map((pid, i) => `
             <div class="thumb">
               <img data-photo="${pid}" alt="Foto ${i + 1}">
+              <span class="thumb-n">${i + 1}</span>
               <button class="thumb-del" data-delphoto="${pid}" aria-label="Borrar foto ${i + 1}">✕</button>
+              <div class="thumb-move">
+                <button data-move="${i}" data-dir="-1" aria-label="Mover antes" ${i === 0 ? 'disabled' : ''}>◀</button>
+                <button data-move="${i}" data-dir="1" aria-label="Mover después" ${i === deck.photos.length - 1 ? 'disabled' : ''}>▶</button>
+              </div>
             </div>`).join('')}
         </div>
-        <label class="btn block" style="margin:10px 0 0">📷 Añadir fotos<input type="file" id="addPhotos" accept="image/*" multiple hidden></label>
+        <div class="row" style="margin-top:10px">
+          <label class="btn" style="margin:0">📷 Añadir fotos o capturas<input type="file" id="addPhotos" accept="image/*" multiple hidden></label>
+          ${deck.photos.length ? '<button class="btn" id="cropOpen">✂️ Recortar</button>' : ''}
+        </div>
         <div id="photoStatus" class="muted small" style="margin-top:6px"></div>
+        <div id="cropPanel"></div>
       </div>
 
       <div class="card ai">
@@ -1655,9 +1951,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
 
       <div class="row">
         <a class="btn primary" href="#/deck/${deck.id}">Ir a estudiar</a>
-        <button class="btn" id="share" ${deck.cards.length ? '' : 'disabled'}>📤 Compartir tema</button>
       </div>
-      <p class="muted small">"Compartir tema" crea un archivo con las tarjetas (sin las fotos) para enviárselo a otra familia, por ejemplo por WhatsApp. Lo abren con "Buscar tema → Importar tema".</p>
       <button class="btn ghost block" id="delDeck" style="color:var(--bad)">Borrar tema</button>
     `;
     hydratePhotos(app);
@@ -1676,7 +1970,8 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
 
     // Fotos
     $('#addPhotos').onchange = async (e) => {
-      const files = Array.from(e.target.files || []);
+      // Orden en que se hicieron (las capturas suelen hacerse página a página).
+      const files = Array.from(e.target.files || []).sort((a, b) => (a.lastModified - b.lastModified) || a.name.localeCompare(b.name, 'es', { numeric: true }));
       if (!files.length) return;
       const status = $('#photoStatus');
       let added = 0, failed = 0;
@@ -1697,6 +1992,16 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
       if (added) toast(`${added} ${added === 1 ? 'foto añadida' : 'fotos añadidas'}`);
       if (failed) setTimeout(() => toast(`${failed} ${failed === 1 ? 'foto no se pudo' : 'fotos no se pudieron'} guardar (formato no compatible o sin espacio)`), added ? 2700 : 0);
     };
+    $$('[data-move]').forEach((b) => {
+      b.onclick = () => {
+        const i = Number(b.dataset.move), j = i + Number(b.dataset.dir);
+        if (j < 0 || j >= deck.photos.length) return;
+        [deck.photos[i], deck.photos[j]] = [deck.photos[j], deck.photos[i]];
+        save();
+        viewEdit(id);
+      };
+    });
+    if ($('#cropOpen')) $('#cropOpen').onclick = () => openCropPanel(deck, $('#cropPanel'), () => viewEdit(id));
     $$('[data-delphoto]').forEach((b) => {
       b.onclick = async () => {
         if (!confirm('¿Borrar esta foto?')) return;
@@ -1877,7 +2182,6 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
         viewEdit(id);
       };
     });
-    $('#share').onclick = () => shareDeck(deck);
     $('#delDeck').onclick = async () => {
       if (!confirm(`¿Borrar "${deckTitle(deck)}" con todas sus tarjetas y fotos?`)) return;
       await deletePhotos(deck.photos);
@@ -1898,7 +2202,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     if (!P() && data.profiles.length) data.activeId = data.profiles[0].id;
     renderHeader();
     if (!P() || parts[0] === 'welcome') return viewWelcome();
-    if (parts[0] === 'profiles') return viewProfiles();
+    if (parts[0] === 'profiles') return go('#/');
     if (!P().course) return viewChooseCourse();
     switch (parts[0]) {
       case 'deck': return viewDeck(parts[1]);
@@ -1908,6 +2212,8 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
       case 'quiz': return viewQuiz(parts[1], parts[2] === 'write' ? 'write' : 'choice');
       case 'math': return parts[1] === 'play' ? playMath() : viewMath();
       case 'search': return viewSearch();
+      case 'books': return viewBooks();
+      case 'book': return viewBook(parts[1]);
       case 'new': return viewNew();
       case 'parents': return viewParents();
       case 'edit': return viewEdit(parts[1]);
