@@ -259,7 +259,8 @@
       <div class="emoji">${esc(d.emoji || '📘')}</div>
       <div class="name">${esc(deckTitle(d))}</div>
       ${deckMeta(d) ? `<div class="muted small">${esc(deckMeta(d))}</div>` : ''}
-      <div class="muted small">${d.cards.length} tarjetas${d.photos?.length ? ` · 📷 ${d.photos.length}` : ''} · ${d.cards.length ? (due ? `${due} por repasar` : 'al día ✅') : 'sin tarjetas'}</div>
+      <div class="muted small">${d.cards.length} tarjetas · ${d.cards.length ? (due ? `${due} por repasar` : 'al día ✅') : 'sin tarjetas'}</div>
+      <div class="tile-stars" title="${starCount(d)} de 5 estrellas">${starsHtml(d)}</div>
     </a>`;
   };
 
@@ -451,36 +452,283 @@
     const deck = getDeck(id);
     if (!deck) return go('#/');
     const due = dueCards(deck).length;
-    const canQuiz = deck.cards.length >= 2;
+    const ex = deck.explain;
+    const hasMaterial = !!(deck.lesson?.outline || deck.lesson?.summary || deck.photos?.length || deck.videos?.length);
+    const row = (n, key, title, desc, href, ok) => `
+      <${ok ? 'a' : 'div'} class="step ${deck.progress?.[key] ? 'done' : ''} ${ok ? '' : 'off'}" ${ok ? `href="${href}"` : ''}>
+        <span class="step-n">${n}</span>
+        <span class="step-body"><b>${title}</b><span class="muted small">${desc}</span></span>
+        <span class="step-star">${deck.progress?.[key] ? '⭐' : '☆'}</span>
+      </${ok ? 'a' : 'div'}>`;
+    const needAi = 'Prepáralo con IA en "Editar este tema"';
     app.innerHTML = `
       <a class="back" href="#/">← Inicio</a>
       <h1 style="margin-bottom:2px">${esc(deck.emoji || '📘')} ${esc(deckTitle(deck))}</h1>
       <p class="muted">${esc(deckMeta(deck))}${deckMeta(deck) ? '<br>' : ''}${deckBookInfo(deck)}${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
-      ${hasLesson(deck) ? `
-      <div class="card learn">
-        <h2 style="margin-top:0">📖 Aprender</h2>
-        <p class="muted small">Esquema, resumen que se puede escuchar${deck.photos?.length ? ', fotos' : ''}${deck.videos?.length ? ' y vídeos' : ''}. Empieza por aquí antes de las preguntas.</p>
-        <a class="btn primary block" href="#/learn/${deck.id}">Empezar a aprender</a>
-      </div>` : `<p class="muted small">💡 En "Editar este tema" puedes añadir un esquema, un resumen y vídeos para estudiarlo antes de las preguntas.</p>`}
-      ${deck.cards.length === 0 ? `<div class="card">Este tema todavía no tiene tarjetas. Añádelas en "Editar este tema": a mano o a partir de las fotos.</div>` : `
-      <div class="card">
-        <h2 style="margin-top:0">🃏 Tarjetas</h2>
-        <p class="muted small">Lee la pregunta, piensa la respuesta y dale la vuelta. Las que fallas salen más a menudo.</p>
-        <div class="row">
-          <a class="btn primary" href="#/study/${deck.id}">${due ? `Repasar (${due})` : 'Repasar todas'}</a>
-        </div>
+
+      <div class="card route">
+        <div class="route-head"><h2 style="margin:0">🧭 Tu ruta de estudio</h2><span class="stars">${starsHtml(deck)}</span></div>
+        <p class="muted small">Sigue los pasos en orden. Cada paso completado es una estrella.</p>
+        ${row(1, 'entender', '📖 Entender el tema', ex ? `Explicación con ejemplos, curiosidades y preguntas · ${ex.apartados.length} apartados` : needAi, `#/explain/${deck.id}`, !!ex)}
+        ${row(2, 'esquema', '🗺️ Esquema en blanco', deck.lesson?.outline ? 'Recuerda cada idea del esquema antes de destaparla' : needAi, `#/blank/${deck.id}`, !!deck.lesson?.outline)}
+        ${row(3, 'tarjetas', '🃏 Tarjetas', deck.cards.length ? (due ? `${due} por repasar hoy` : 'Todas al día ✅ (puedes repasarlas igual)') : 'Este tema aún no tiene tarjetas', `#/study/${deck.id}`, deck.cards.length > 0)}
+        ${row(4, 'desarrollo', '✍️ Preguntas de desarrollo', deck.dev?.length ? `${deck.dev.length} preguntas tipo examen · consigue un 5 o más` : needAi, `#/dev/${deck.id}`, !!deck.dev?.length)}
+        ${row(5, 'test', '📝 Test', deck.cards.length ? 'Saca un 7 o más para la estrella' : 'Hace falta tener tarjetas', `#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}`, deck.cards.length > 0)}
       </div>
-      <div class="card">
-        <h2 style="margin-top:0">📝 Test</h2>
-        <p class="muted small">Hasta ${QUIZ_LENGTH} preguntas, como en un examen.</p>
-        <div class="row">
-          ${canQuiz ? `<a class="btn primary" href="#/quiz/${deck.id}/choice">Elegir respuesta</a>` : ''}
-          <a class="btn" href="#/quiz/${deck.id}/write">Escribir respuesta</a>
-        </div>
-        ${canQuiz ? '' : '<p class="muted small">Para el test de elegir respuesta hacen falta al menos 2 tarjetas.</p>'}
-      </div>`}
+
+      ${hasMaterial ? `<a class="card deck" href="#/learn/${deck.id}" style="margin-bottom:12px">
+        <div class="name">📚 Material del tema</div>
+        <div class="muted small">Esquema, resumen para escuchar${deck.photos?.length ? ', páginas del libro' : ''}${deck.videos?.length ? ' y vídeos' : ''}</div>
+      </a>` : ''}
+      ${deck.cards.length ? `<div class="row" style="margin-bottom:12px"><a class="btn" href="#/quiz/${deck.id}/write">✏️ Test escribiendo la respuesta</a></div>` : ''}
       <a class="btn ghost block" href="#/edit/${deck.id}">✏️ Editar este tema</a>
     `;
+  }
+
+  // ---- Entender: explicación por pantallas ----
+  function viewExplain(id) {
+    const deck = getDeck(id);
+    if (!deck || !deck.explain) return go(`#/deck/${id}`);
+    const ex = deck.explain;
+    const screens = [{ type: 'intro' }, ...ex.apartados.map((a, i) => ({ type: 'ap', a, i }))];
+    if (ex.linea_tiempo.length || ex.causas_consecuencias.length) screens.push({ type: 'rel' });
+    if (ex.glosario.length) screens.push({ type: 'glo' });
+    screens.push({ type: 'end' });
+    let n = 0;
+    const answered = new Set();
+
+    function body(sc) {
+      if (sc.type === 'intro') {
+        return `<div class="card rich explain-card"><div class="big-emoji">${esc(deck.emoji || '📘')}</div>
+          <h2 data-say>${esc(deckTitle(deck))}</h2>
+          ${ex.intro ? `<p data-say class="lead">${inline(ex.intro)}</p>` : ''}
+          <p class="muted small">En ${ex.apartados.length} pasos vas a entender todo el tema. Lee con calma (o escúchalo) y responde a la pregunta de cada paso.</p></div>`;
+      }
+      if (sc.type === 'ap') {
+        const a = sc.a, q = a.pregunta;
+        return `<div class="card rich explain-card">
+          <div class="muted small">Apartado ${sc.i + 1} de ${ex.apartados.length}</div>
+          <h2 data-say>${esc(a.titulo)}</h2>
+          ${renderRich(a.texto)}
+          ${a.ejemplo ? `<div class="box example"><b>🧩 Para entenderlo</b><p data-say>${inline(a.ejemplo)}</p></div>` : ''}
+          ${a.sabias_que ? `<div class="box fun"><b>💡 ¿Sabías que…?</b><p data-say>${inline(a.sabias_que)}</p></div>` : ''}
+          </div>
+          ${q ? `<div class="card check">
+            <b>🤔 Comprueba que lo has entendido</b>
+            <p>${inline(q.enunciado)}</p>
+            <div class="options">${q.opciones.map((o, k) => `<button class="btn option" data-k="${k}"><span class="opt-n">${k + 1}</span>${inline(o)}</button>`).join('')}</div>
+            <div id="qfb"></div>
+          </div>` : ''}`;
+      }
+      if (sc.type === 'rel') {
+        return `<div class="card rich explain-card">
+          ${ex.linea_tiempo.length ? `<h2 data-say>🕰️ Línea del tiempo</h2>
+            <ol class="timeline">${ex.linea_tiempo.map((t) => `<li data-say><span class="t-date">${esc(t.fecha)}</span><span>${inline(t.hecho)}</span></li>`).join('')}</ol>` : ''}
+          ${ex.causas_consecuencias.length ? `<h2 data-say>🔗 Causas y consecuencias</h2>
+            ${ex.causas_consecuencias.map((c) => `<div class="cause" data-say><div class="c-box">${inline(c.causa)}</div><div class="c-arrow">➜</div><div class="c-box res">${inline(c.consecuencia)}</div></div>`).join('')}` : ''}
+        </div>`;
+      }
+      if (sc.type === 'glo') {
+        return `<div class="card rich explain-card"><h2 data-say>📒 Palabras clave</h2>
+          <dl class="glossary">${ex.glosario.map((g) => `<div data-say><dt>${esc(g.termino)}</dt><dd>${inline(g.definicion)}</dd></div>`).join('')}</dl></div>`;
+      }
+      return `<div class="card center explain-card"><div class="huge">🎉</div><h2>¡Has terminado la explicación!</h2>
+        <p>Ahora toca memorizar la estructura del tema con el <b>esquema en blanco</b>.</p>
+        <div class="row">${deck.lesson?.outline ? `<a class="btn primary" href="#/blank/${deck.id}">🗺️ Ir al esquema en blanco</a>` : ''}<a class="btn" href="#/deck/${deck.id}">Volver al tema</a></div></div>`;
+    }
+
+    function render() {
+      speech.stop();
+      const sc = screens[n];
+      const needsAnswer = sc.type === 'ap' && sc.a.pregunta && !answered.has(n);
+      app.innerHTML = `
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+        <div class="progress"><div style="width:${(n / (screens.length - 1)) * 100}%"></div></div>
+        ${speech.supported && sc.type !== 'end' ? `<div class="row tts" style="margin-bottom:10px">
+          <button class="btn" id="ttsPlay">🔊 Escuchar</button><button class="btn" id="ttsStop" hidden>⏹ Parar</button>
+          <select id="ttsRate" aria-label="Velocidad"><option value="1">Velocidad normal</option><option value="0.8">Más despacio</option><option value="1.2">Más rápido</option></select></div>` : ''}
+        <div id="explain">${body(sc)}</div>
+        ${sc.type !== 'end' ? `<div class="row nav">
+          <button class="btn" id="prev" ${n === 0 ? 'disabled' : ''}>← Anterior</button>
+          <button class="btn primary" id="next" ${needsAnswer ? 'disabled' : ''}>${needsAnswer ? 'Responde para seguir' : 'Siguiente →'}</button>
+        </div>` : ''}`;
+      if (sc.type === 'end') markStep(deck, 'entender');
+      if ($('#prev')) $('#prev').onclick = () => { n--; render(); window.scrollTo(0, 0); };
+      if ($('#next')) $('#next').onclick = () => { n++; render(); window.scrollTo(0, 0); };
+      onKey((k) => {
+        if (k === 'ArrowRight' && $('#next') && !$('#next').disabled) $('#next').click();
+        if (k === 'ArrowLeft' && $('#prev') && !$('#prev').disabled) $('#prev').click();
+        const b = $$('.check .option')[Number(k) - 1];
+        if (b) b.click();
+      });
+      if (sc.type === 'ap' && sc.a.pregunta) {
+        const q = sc.a.pregunta;
+        $$('.check .option').forEach((b) => {
+          b.onclick = () => {
+            if (answered.has(n)) return;
+            answered.add(n);
+            const ok = Number(b.dataset.k) === q.correcta;
+            recordAnswer(ok, POINTS_CARD);
+            $$('.check .option').forEach((x) => { if (Number(x.dataset.k) === q.correcta) x.classList.add('correct'); });
+            if (!ok) b.classList.add('wrong');
+            $('#qfb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'ko'}">${ok ? `${cheer()} +${POINTS_CARD} ⭐` : 'Casi. Fíjate en la correcta:'}</div>${q.explicacion ? `<p class="small">${inline(q.explicacion)}</p>` : ''}`;
+            const nx = $('#next');
+            nx.disabled = false;
+            nx.textContent = 'Siguiente →';
+          };
+        });
+        if (answered.has(n)) $$('.check .option').forEach((x) => { if (Number(x.dataset.k) === q.correcta) x.classList.add('correct'); });
+      }
+      if ($('#ttsPlay')) {
+        const blocks = $$('#explain [data-say]');
+        const play = $('#ttsPlay'), stop = $('#ttsStop');
+        const mark = (i) => blocks.forEach((b, k) => b.classList.toggle('reading', k === i));
+        const reset = () => { mark(-1); play.hidden = false; stop.hidden = true; };
+        play.onclick = () => { play.hidden = true; stop.hidden = false; speech.play(blocks.map((b) => plain(b.textContent)), Number($('#ttsRate').value), mark, reset); };
+        stop.onclick = () => { speech.stop(); reset(); };
+      }
+    }
+    render();
+  }
+
+  // ---- Esquema en blanco ----
+  function viewBlank(id) {
+    const deck = getDeck(id);
+    if (!deck || !deck.lesson?.outline) return go(`#/deck/${id}`);
+    let hideTitles = false;
+    function render() {
+      app.innerHTML = `
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+        <h1>🗺️ Esquema en blanco</h1>
+        <p class="muted">Antes de destapar cada idea, intenta decirla en voz alta con tus palabras. Toca la idea para comprobarlo.</p>
+        <div class="row" style="margin-bottom:12px">
+          <label class="check" style="margin:0"><input type="checkbox" id="ht" ${hideTitles ? 'checked' : ''}> Tapar también los títulos (más difícil)</label>
+        </div>
+        <div class="card rich blank-outline" id="bo">${renderRich(deck.lesson.outline)}</div>
+        <div class="muted small" id="bcount"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="cover">🙈 Tapar todo otra vez</button>
+          <button class="btn" id="reveal">👀 Destapar todo</button>
+        </div>`;
+      const items = $$('#bo li' + (hideTitles ? ', #bo h3' : ''));
+      items.forEach((el) => { el.classList.add('blank'); el.setAttribute('role', 'button'); el.tabIndex = 0; });
+      const count = () => {
+        const left = items.filter((el) => el.classList.contains('blank')).length;
+        $('#bcount').textContent = left ? `Te quedan ${left} de ${items.length} ideas por destapar.` : '¡Lo has recorrido entero! 👏';
+        return left;
+      };
+      const reveal = (el) => {
+        if (!el.classList.contains('blank')) return;
+        el.classList.remove('blank');
+        if (count() === 0 && markStep(deck, 'esquema')) $('#bcount').textContent = '¡Esquema completo! Ya conoces la estructura del tema. ⭐';
+      };
+      items.forEach((el) => { el.onclick = () => reveal(el); el.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); reveal(el); } }; });
+      $('#ht').onchange = (e) => { hideTitles = e.target.checked; render(); };
+      $('#cover').onclick = () => render();
+      $('#reveal').onclick = () => { items.forEach((el) => el.classList.remove('blank')); $('#bcount').textContent = 'Todo destapado. Para ganar la estrella, destápalas una a una recordándolas.'; };
+      count();
+    }
+    render();
+  }
+
+  // ---- Preguntas de desarrollo ----
+  function viewDev(id, qi) {
+    const deck = getDeck(id);
+    if (!deck || !deck.dev?.length) return go(`#/deck/${id}`);
+    if (qi == null || !deck.dev[qi]) {
+      app.innerHTML = `
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+        <h1>✍️ Preguntas de desarrollo</h1>
+        <p class="muted">Como en el examen: responde con tus palabras, de forma ordenada y completa. ${aiSettings().key ? 'Claude te corregirá y te dirá qué mejorar.' : 'Después compara con la respuesta modelo.'}</p>
+        ${deck.dev.map((d, i) => `<a class="card deck dev-q" href="#/dev/${deck.id}/${i}">
+          <div class="name">${i + 1}. ${esc(d.q)}</div>
+          <div class="muted small">${d.best != null ? `Mejor nota: <b>${d.best.toLocaleString('es-ES')}</b> ${d.best >= 5 ? '✅' : ''}` : 'Sin responder todavía'}</div>
+        </a>`).join('')}`;
+      return;
+    }
+    const q = deck.dev[qi];
+    const hasKey = !!aiSettings().key;
+    app.innerHTML = `
+      <a class="back" href="#/dev/${deck.id}">← Preguntas de desarrollo</a>
+      <div class="muted small">Pregunta ${Number(qi) + 1} de ${deck.dev.length}</div>
+      <div class="card"><h2 style="margin:0">${esc(q.q)}</h2></div>
+      <div class="card">
+        <label for="devAns" style="margin-top:0">Tu respuesta</label>
+        <textarea id="devAns" class="dev-ans" placeholder="Escribe (o dicta) tu respuesta: introduce el tema, desarrolla las ideas en orden y termina con una conclusión.">${esc(q.last || '')}</textarea>
+        <div class="muted small" id="wc"></div>
+        <div class="row" style="margin-top:10px">
+          ${SpeechRec ? '<button class="btn" id="dict">🎤 Dictar</button>' : ''}
+          <button class="btn primary" id="correct">${hasKey ? '✅ Corregir con Claude' : '✅ He terminado'}</button>
+        </div>
+        ${SpeechRec ? '' : '<p class="muted small">Para dictar, usa el micrófono del teclado de la tablet.</p>'}
+      </div>
+      <div id="result"></div>`;
+    const ta = $('#devAns');
+    const wc = () => { const n = ta.value.trim() ? ta.value.trim().split(/\s+/).length : 0; $('#wc').textContent = `${n} palabras`; };
+    ta.oninput = () => { wc(); q.last = ta.value; };
+    ta.onchange = () => save();
+    wc();
+    if ($('#dict')) $('#dict').onclick = () => toggleDictation(ta, $('#dict'));
+
+    const finish = (nota) => {
+      q.best = q.best == null ? nota : Math.max(q.best, nota);
+      q.last = ta.value;
+      recordAnswer(nota >= 5, Math.round(nota * 3));
+      if (nota >= 5) markStep(deck, 'desarrollo');
+      save();
+    };
+    const modelHtml = () => `<details class="card"><summary><b>📄 Respuesta modelo</b></summary><div class="rich">${renderRich(q.model)}</div></details>`;
+    const nextBtns = () => `<div class="row">
+      ${Number(qi) + 1 < deck.dev.length ? `<a class="btn primary" href="#/dev/${deck.id}/${Number(qi) + 1}">Siguiente pregunta →</a>` : `<a class="btn primary" href="#/deck/${deck.id}">Volver al tema</a>`}
+      <button class="btn" id="retry">🔁 Intentarlo otra vez</button></div>`;
+    const bindRetry = () => { $('#retry').onclick = () => { ta.value = ''; q.last = ''; save(); viewDev(id, qi); }; };
+
+    $('#correct').onclick = async () => {
+      stopDictation();
+      const answer = ta.value.trim();
+      if (answer.split(/\s+/).length < 15) return toast('Escribe un poco más (al menos unas líneas)');
+      q.last = answer;
+      save();
+      const out = $('#result');
+      if (hasKey) {
+        const btn = $('#correct');
+        btn.disabled = true;
+        out.innerHTML = '<div class="card muted">Claude está corrigiendo tu respuesta…</div>';
+        try {
+          const r = await aiCorrect(deck, q, answer);
+          finish(r.nota);
+          out.innerHTML = `
+            <div class="card center grade ${r.nota >= 5 ? 'ok' : 'ko'}"><div class="grade-n">${r.nota.toLocaleString('es-ES')}</div><div>${r.nota >= 9 ? '¡Excelente! 🏆' : r.nota >= 7 ? '¡Muy bien! 👏' : r.nota >= 5 ? 'Aprobado 👍' : 'Hay que repasarlo 💪'}</div></div>
+            ${r.bien ? `<div class="card box ok-box"><b>👍 Lo que has hecho bien</b><p>${inline(r.bien)}</p></div>` : ''}
+            ${r.mejorar ? `<div class="card box fun"><b>🛠️ Para mejorar</b><p>${inline(r.mejorar)}</p></div>` : ''}
+            ${r.consejo ? `<div class="card box example"><b>💡 Consejo</b><p>${inline(r.consejo)}</p></div>` : ''}
+            <div class="card"><b>Puntos clave</b><ul class="keypoints">${q.points.map((pt, i) => `<li class="${r.included[i] ? 'yes' : 'no'}">${r.included[i] ? '✅' : '❌'} ${inline(pt)}</li>`).join('')}</ul></div>
+            ${modelHtml()}
+            ${nextBtns()}`;
+          bindRetry();
+        } catch (e) {
+          out.innerHTML = '';
+          toast(e.message || 'No se pudo corregir');
+        } finally {
+          btn.disabled = false;
+        }
+        return;
+      }
+      // Sin clave: autoevaluación con los puntos clave
+      out.innerHTML = `
+        <div class="card"><b>Marca los puntos clave que has incluido en tu respuesta</b>
+          <ul class="keypoints selfcheck">${q.points.map((pt, i) => `<li><label class="check" style="margin:6px 0"><input type="checkbox" data-pt="${i}"> ${inline(pt)}</label></li>`).join('')}</ul>
+          <button class="btn primary block" id="grade">Calcular mi nota</button>
+        </div>
+        ${modelHtml()}`;
+      $('#grade').onclick = () => {
+        const n = $$('[data-pt]').filter((c) => c.checked).length;
+        const nota = q.points.length ? Math.round((n / q.points.length) * 100) / 10 : 0;
+        finish(nota);
+        $('#grade').outerHTML = `<div class="card center grade ${nota >= 5 ? 'ok' : 'ko'}" style="margin-top:10px"><div class="grade-n">${nota.toLocaleString('es-ES')}</div><div>${nota >= 5 ? '¡Bien!' : 'Repasa los puntos que te faltan 💪'}</div></div>${nextBtns()}`;
+        bindRetry();
+      };
+    };
   }
 
   function viewPhotos(id) {
@@ -513,12 +761,15 @@
 
     function render() {
       if (!queue.length) {
+        const firstStar = !deck.progress?.tarjetas;
+        if (firstStar) setTimeout(() => markStep(deck, 'tarjetas'), 0);
         app.innerHTML = `
           <div class="center">
             <div class="huge">🎉</div>
             <h1>¡Repaso terminado!</h1>
             <p>Has acertado <b>${right}</b> de <b>${done}</b>.</p>
           </div>
+          ${firstStar ? '<p class="center">⭐ Has ganado la estrella de las tarjetas</p>' : ''}
           <div class="row">
             <a class="btn primary" href="#/deck/${deck.id}">Volver al tema</a>
             <a class="btn" href="#/">Inicio</a>
@@ -582,11 +833,14 @@
     function render() {
       if (i >= questions.length) {
         const nota = Math.round((right / questions.length) * 100) / 10;
+        const star = nota >= 7 && !deck.progress?.test;
+        if (star) setTimeout(() => markStep(deck, 'test'), 0);
         app.innerHTML = `
           <div class="center">
             <div class="huge">${nota >= 9 ? '🏆' : nota >= 6 ? '👏' : '💪'}</div>
             <h1>Nota: ${nota.toLocaleString('es-ES')}</h1>
             <p>${right} de ${questions.length} correctas</p>
+            ${star ? '<p>⭐ Has ganado la estrella del test</p>' : nota < 7 && !deck.progress?.test ? '<p class="muted small">Con un 7 o más ganas la estrella del test.</p>' : ''}
           </div>
           ${mistakes.length ? `<div class="card"><h2 style="margin-top:0">Para repasar</h2><ul class="list">
             ${mistakes.map((c) => `<li><span class="qa">${esc(c.q)}</span><b class="qa">${esc(c.a)}</b></li>`).join('')}
@@ -1367,12 +1621,12 @@
 
   // ---------- IA (Claude) ----------
   // Dos formas: (1) copiar/pegar con la app de Claude del usuario; (2) llamada directa a la API con una clave
-  // que se guarda solo en este dispositivo (nunca en las copias de seguridad ni al compartir).
+  // que se guarda solo en este dispositivo (nunca en las copias de seguridad).
   const AI_KEY = 'app-studio-ai';
   const AI_MODELS = [
-    { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (el mejor, ~10 cts/tema)', price: [4, 20], fallbacks: true },
-    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (muy bueno, ~5 cts/tema)', price: [2, 10], fallbacks: true },
-    { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (el más barato, <1 ct/tema)', price: [0.1, 0.5], fallbacks: false },
+    { id: 'claude-opus-5-5', label: 'Claude Opus 5.5 (el mejor, ~25 cts por tema)', price: [4, 20], fallbacks: true },
+    { id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5 (muy bueno, ~12 cts por tema)', price: [2, 10], fallbacks: true },
+    { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5 (el más barato, ~1 ct por tema)', price: [0.1, 0.5], fallbacks: false },
   ];
   function aiSettings() {
     try { return JSON.parse(localStorage.getItem(AI_KEY)) || {}; } catch (e) { return {}; }
@@ -1384,38 +1638,76 @@
   function aiInstructions(deck, source) {
     const course = courseById(deck.course)?.label || courseById(P().course)?.label || 'Secundaria';
     const what = [deck.subject && `de ${deck.subject}`, deck.publisher && `(libro de ${deck.publisher})`].filter(Boolean).join(' ');
-    return `Eres un profesor que ayuda a un alumno de ${course} a estudiar.
-Te paso ${source} del tema "${deckTitle(deck)}" ${what}.
-Con esa información prepara material de estudio:
+    return `Eres un profesor excelente, cercano y entusiasta. Prepara material para que un alumno de ${course} estudie el tema "${deckTitle(deck)}" ${what}. Te paso ${source}.
+En el examen tendrá que saber DESARROLLAR el tema (no solo datos sueltos), así que el material debe ayudarle a entenderlo bien y a memorizar su estructura. Que sea claro, ameno y motivador, adecuado para su edad.
 
-1. "esquema": esquema del tema. Usa "# " al principio de la línea para cada apartado, "- " para cada idea y "  - " (dos espacios) para las subideas. Frases cortas. Marca los conceptos clave con **negrita**.
-2. "resumen": resumen claro y fácil de entender para su edad, de 200 a 500 palabras, en párrafos separados por una línea en blanco. Usa "# " para los títulos de los apartados y pon en **negrita** los conceptos más importantes. Debe poder leerse en voz alta.
-3. "tarjetas": entre 10 y 20 preguntas de repaso con respuestas cortas (máximo 10 palabras) y exactas, que sirvan para un test.
+Prepara:
+1. "explicacion": la explicación completa del tema, como la daría un buen profesor:
+   - "intro": 2 a 4 frases que enganchen: de qué va el tema y por qué es interesante o útil.
+   - "apartados": uno por cada apartado del tema, en el mismo orden. En cada uno:
+     · "titulo".
+     · "texto": explicación clara y completa (100 a 250 palabras), con frases cortas, párrafos separados por una línea en blanco y los conceptos clave en **negrita**. No te saltes contenidos del tema.
+     · "ejemplo": un ejemplo o comparación con la vida cotidiana de un chico de su edad que ayude a entenderlo.
+     · "sabias_que": una curiosidad real relacionada con el apartado, o "" si no tienes una segura.
+     · "pregunta": pregunta de comprensión con 3 o 4 "opciones", el índice de la "correcta" (empezando en 0) y una "explicacion" breve de por qué es la correcta.
+   - "linea_tiempo": fechas o etapas en orden, si el tema es de Historia o tiene cronología; si no, [].
+   - "causas_consecuencias": si el tema tiene hechos o procesos con causas y consecuencias; si no, [].
+   - "glosario": las palabras clave del tema con una definición sencilla.
+   Adapta la explicación a la asignatura: en Lengua, pon ejemplos de cada concepto; en Ciencias, explica los procesos paso a paso y compara conceptos parecidos; en Matemáticas, incluye ejemplos resueltos paso a paso.
+2. "esquema": esquema del tema. Usa "# " al principio de la línea para cada apartado, "- " para cada idea y "  - " (dos espacios) para las subideas. Frases cortas. Marca los conceptos clave con **negrita**.
+3. "resumen": resumen de 200 a 500 palabras, en párrafos separados por una línea en blanco, con "# " para los títulos de los apartados y los conceptos más importantes en **negrita**. Debe poder leerse en voz alta.
+4. "tarjetas": entre 10 y 20 preguntas de repaso con respuestas cortas (máximo 10 palabras) y exactas, que sirvan para un test.
+5. "desarrollo": entre 3 y 6 preguntas de desarrollo como las de un examen ("Explica…", "Compara…", "Describe…"), cada una con una "respuesta_modelo" de 120 a 250 palabras bien redactada, como la escribiría un buen alumno de su curso, y los "puntos_clave" (de 4 a 8) que debe incluir una buena respuesta.
 
-Reglas: usa solo la información del tema y no inventes datos. Si una parte de una foto no se lee bien, ignórala. Escribe en español.`;
+Reglas: usa solo la información del tema y conocimientos básicos seguros; no inventes datos, fechas ni nombres. Si una parte de las fotos no se lee bien, ignórala. Escribe en español de España.`;
   }
   const AI_FORMAT = `
 
-Responde SOLO con un bloque de código JSON con esta forma exacta:
-{"esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}]}`;
-  const AI_SCHEMA = {
-    type: 'object',
-    properties: {
-      esquema: { type: 'string' },
-      resumen: { type: 'string' },
-      tarjetas: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: { pregunta: { type: 'string' }, respuesta: { type: 'string' } },
-          required: ['pregunta', 'respuesta'],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ['esquema', 'resumen', 'tarjetas'],
-    additionalProperties: false,
-  };
+Responde SOLO con un bloque de código JSON con esta forma exacta (sin nada más):
+{"explicacion": {"intro": "…", "apartados": [{"titulo": "…", "texto": "…", "ejemplo": "…", "sabias_que": "…", "pregunta": {"enunciado": "…", "opciones": ["…", "…", "…"], "correcta": 0, "explicacion": "…"}}], "linea_tiempo": [{"fecha": "…", "hecho": "…"}], "causas_consecuencias": [{"causa": "…", "consecuencia": "…"}], "glosario": [{"termino": "…", "definicion": "…"}]}, "esquema": "…", "resumen": "…", "tarjetas": [{"pregunta": "…", "respuesta": "…"}], "desarrollo": [{"pregunta": "…", "respuesta_modelo": "…", "puntos_clave": ["…"]}]}`;
+
+  const str = { type: 'string' };
+  const obj = (props) => ({ type: 'object', properties: props, required: Object.keys(props), additionalProperties: false });
+  const arr = (items) => ({ type: 'array', items });
+  const AI_SCHEMA = obj({
+    explicacion: obj({
+      intro: str,
+      apartados: arr(obj({
+        titulo: str, texto: str, ejemplo: str, sabias_que: str,
+        pregunta: obj({ enunciado: str, opciones: arr(str), correcta: { type: 'integer' }, explicacion: str }),
+      })),
+      linea_tiempo: arr(obj({ fecha: str, hecho: str })),
+      causas_consecuencias: arr(obj({ causa: str, consecuencia: str })),
+      glosario: arr(obj({ termino: str, definicion: str })),
+    }),
+    esquema: str,
+    resumen: str,
+    tarjetas: arr(obj({ pregunta: str, respuesta: str })),
+    desarrollo: arr(obj({ pregunta: str, respuesta_modelo: str, puntos_clave: arr(str) })),
+  });
+  const CORRECT_SCHEMA = obj({ nota: { type: 'number' }, puntos: arr(obj({ incluido: { type: 'boolean' } })), bien: str, mejorar: str, consejo: str });
+
+  const S = (v) => String(v ?? '').trim();
+  function normalizeExplain(e) {
+    if (!e || typeof e !== 'object') return null;
+    const apartados = (Array.isArray(e.apartados) ? e.apartados : []).map((a) => {
+      const q = a?.pregunta || {};
+      const opciones = (Array.isArray(q.opciones) ? q.opciones : []).map(S).filter(Boolean);
+      const correcta = Number.isInteger(q.correcta) && q.correcta >= 0 && q.correcta < opciones.length ? q.correcta : -1;
+      return {
+        titulo: S(a?.titulo), texto: S(a?.texto), ejemplo: S(a?.ejemplo), sabias_que: S(a?.sabias_que),
+        pregunta: S(q.enunciado) && opciones.length >= 2 && correcta >= 0 ? { enunciado: S(q.enunciado), opciones, correcta, explicacion: S(q.explicacion) } : null,
+      };
+    }).filter((a) => a.titulo || a.texto);
+    if (!apartados.length) return null;
+    const list = (v, keys) => (Array.isArray(v) ? v : []).map((x) => Object.fromEntries(keys.map((k) => [k, S(x?.[k])]))).filter((x) => keys.every((k) => x[k]));
+    return {
+      intro: S(e.intro), apartados,
+      linea_tiempo: list(e.linea_tiempo, ['fecha', 'hecho']),
+      causas_consecuencias: list(e.causas_consecuencias, ['causa', 'consecuencia']),
+      glosario: list(e.glosario, ['termino', 'definicion']),
+    };
+  }
 
   // Lee la respuesta (JSON) de Claude, venga de la API o pegada a mano.
   function parseAiResult(raw) {
@@ -1425,15 +1717,19 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     const a = t.indexOf('{'), b = t.lastIndexOf('}');
     if (a < 0 || b <= a) throw new Error('No encuentro el bloque JSON en la respuesta');
     const jsonText = t.slice(a, b + 1);
-    let obj;
-    try { obj = JSON.parse(jsonText); } catch (e) { obj = JSON.parse(jsonText.replace(/[“”]/g, '"')); }
-    const esquema = String(obj.esquema || '').trim();
-    const resumen = String(obj.resumen || '').trim();
-    const tarjetas = (Array.isArray(obj.tarjetas) ? obj.tarjetas : [])
-      .map((c) => ({ q: String(c.pregunta || c.q || '').trim(), a: String(c.respuesta || c.a || '').trim() }))
+    let o;
+    try { o = JSON.parse(jsonText); } catch (e) { o = JSON.parse(jsonText.replace(/[“”]/g, '"')); }
+    const esquema = S(o.esquema);
+    const resumen = S(o.resumen);
+    const tarjetas = (Array.isArray(o.tarjetas) ? o.tarjetas : [])
+      .map((c) => ({ q: S(c?.pregunta || c?.q), a: S(c?.respuesta || c?.a) }))
       .filter((c) => c.q && c.a);
-    if (!esquema && !resumen && !tarjetas.length) throw new Error('La respuesta está vacía');
-    return { esquema, resumen, tarjetas };
+    const explicacion = normalizeExplain(o.explicacion);
+    const desarrollo = (Array.isArray(o.desarrollo) ? o.desarrollo : [])
+      .map((d) => ({ q: S(d?.pregunta), model: S(d?.respuesta_modelo), points: (Array.isArray(d?.puntos_clave) ? d.puntos_clave : []).map(S).filter(Boolean) }))
+      .filter((d) => d.q && d.model);
+    if (!esquema && !resumen && !tarjetas.length && !explicacion && !desarrollo.length) throw new Error('La respuesta está vacía');
+    return { esquema, resumen, tarjetas, explicacion, desarrollo };
   }
 
   const blobToBase64 = (blob) => new Promise((resolve, reject) => {
@@ -1443,11 +1739,78 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     r.readAsDataURL(blob);
   });
 
-  // Llamada directa a la API de Claude desde el navegador (solo para uso personal en este dispositivo).
-  async function aiGenerate(deck, onStatus) {
+  // Llamada a la API de Claude desde el navegador (uso personal en este dispositivo), con respuesta en directo.
+  async function aiRequest({ content, schema, maxTokens = 32000, effort = 'medium', onProgress }) {
     const cfg = aiSettings();
     if (!cfg.key) throw new Error('Falta la clave de la API (Zona padres → Inteligencia artificial)');
     const model = AI_MODELS.find((m) => m.id === cfg.model) || AI_MODELS[0];
+    const body = {
+      model: model.id,
+      max_tokens: maxTokens,
+      stream: true,
+      output_config: { effort, format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content }],
+    };
+    const send = (withFallbacks) => {
+      const headers = {
+        'content-type': 'application/json',
+        'x-api-key': cfg.key,
+        'anthropic-version': '2026-10-21',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      };
+      const b = { ...body };
+      if (withFallbacks) { headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; b.fallbacks = 'default'; }
+      return fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(b) });
+    };
+    let res;
+    try {
+      res = await send(model.fallbacks);
+      // Si la petición con "fallbacks" no se acepta, se repite sin ella.
+      if (res.status === 400 && model.fallbacks) res = await send(false);
+    } catch (e) {
+      throw new Error('No se pudo conectar con Claude. Comprueba la conexión a internet.');
+    }
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const msg = json?.error?.message || `error ${res.status}`;
+      if (res.status === 401) throw new Error('La clave de la API no es válida');
+      if (/credit balance/i.test(msg)) throw new Error('No queda saldo en la cuenta de la API (console.anthropic.com → Billing)');
+      if (res.status === 429) throw new Error('Demasiadas peticiones seguidas. Espera un minuto y vuelve a probar.');
+      if (res.status === 529 || res.status >= 500) throw new Error('Claude está saturado ahora mismo. Prueba en unos minutos.');
+      throw new Error(`Claude devolvió un error: ${msg}`);
+    }
+    // Lectura de eventos (server-sent events)
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', text = '', stop = null, inTok = 0, outTok = 0;
+    const handle = (ev) => {
+      if (ev.type === 'message_start') inTok = ev.message?.usage?.input_tokens || 0;
+      else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { text += ev.delta.text; if (onProgress) onProgress(text.length); }
+      else if (ev.type === 'message_delta') { stop = ev.delta?.stop_reason || stop; outTok = ev.usage?.output_tokens || outTok; }
+      else if (ev.type === 'error') throw new Error(ev.error?.type === 'overloaded_error' ? 'Claude está saturado ahora mismo. Prueba en unos minutos.' : `Claude devolvió un error: ${ev.error?.message || ''}`);
+    };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let k;
+      while ((k = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, k);
+        buf = buf.slice(k + 2);
+        const data = chunk.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('');
+        if (!data) continue;
+        let ev;
+        try { ev = JSON.parse(data); } catch (e) { continue; }
+        handle(ev);
+      }
+    }
+    if (stop === 'refusal') throw new Error('Claude no ha querido procesar este contenido');
+    if (stop === 'max_tokens') throw new Error('La respuesta salió demasiado larga. Prueba con menos páginas.');
+    const cost = (inTok * model.price[0] + outTok * model.price[1]) / 1e6;
+    return { text, cost };
+  }
+
+  async function aiGenerate(deck, onStatus) {
     const content = [];
     const blobs = [];
     for (const pid of deck.photos || []) {
@@ -1460,50 +1823,87 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
     }
     const text = (deck.ocrText || '').trim();
     if (!blobs.length && !text) throw new Error('El tema no tiene fotos ni texto');
-    const source = blobs.length ? `${blobs.length} ${blobs.length === 1 ? 'foto' : 'fotos'}` : 'el texto';
+    const source = blobs.length ? `${blobs.length} ${blobs.length === 1 ? 'foto' : 'fotos'} de las páginas` : 'el texto';
     content.push({ type: 'text', text: aiInstructions(deck, source) + (blobs.length ? '' : `\n\nTexto del tema:\n${text}`) });
+    onStatus('Claude está leyendo el tema…');
+    const { text: out, cost } = await aiRequest({
+      content, schema: AI_SCHEMA,
+      onProgress: (n) => onStatus(`Claude está escribiendo la explicación… (${n.toLocaleString('es-ES')} caracteres)`),
+    });
+    return { ...parseAiResult(out), cost };
+  }
 
-    const body = {
-      model: model.id,
-      max_tokens: 16000,
-      output_config: { effort: 'medium', format: { type: 'json_schema', schema: AI_SCHEMA } },
-      messages: [{ role: 'user', content }],
+  // Corrección de una respuesta de desarrollo.
+  async function aiCorrect(deck, q, answer) {
+    const course = courseById(deck.course)?.label || courseById(P().course)?.label || 'Secundaria';
+    const prompt = `Eres un profesor de ${course}, justo y motivador. Corrige la respuesta de un alumno a una pregunta de desarrollo del tema "${deckTitle(deck)}"${deck.subject ? ` de ${deck.subject}` : ''}.
+
+Pregunta: ${q.q}
+
+Respuesta modelo: ${q.model}
+
+Puntos clave que debe incluir:
+${q.points.map((x, i) => `${i + 1}. ${x}`).join('\n')}
+
+Respuesta del alumno (puede estar dictada por voz, así que no tengas en cuenta la puntuación):
+"""${answer}"""
+
+Valora sobre todo que el contenido sea correcto y completo y que esté bien explicado y ordenado. Devuelve:
+- "nota": de 0 a 10 (puede tener un decimal).
+- "puntos": para cada punto clave, en el mismo orden, "incluido": true o false.
+- "bien": lo que ha hecho bien (1 a 3 frases, hablándole de tú).
+- "mejorar": lo que le falta o debe corregir (1 a 3 frases, de tú).
+- "consejo": un consejo concreto para la próxima vez (1 frase).`;
+    const { text, cost } = await aiRequest({ content: [{ type: 'text', text: prompt }], schema: CORRECT_SCHEMA, maxTokens: 4000, effort: 'low' });
+    const o = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+    const nota = Math.max(0, Math.min(10, Math.round(Number(o.nota) * 10) / 10 || 0));
+    return { nota, included: q.points.map((_, i) => !!o.puntos?.[i]?.incluido), bien: S(o.bien), mejorar: S(o.mejorar), consejo: S(o.consejo), cost };
+  }
+
+  // ---------- Ruta de estudio: pasos y estrellas ----------
+  const STEPS = [
+    ['entender', '📖 Entender el tema'],
+    ['esquema', '🗺️ Esquema en blanco'],
+    ['tarjetas', '🃏 Tarjetas'],
+    ['desarrollo', '✍️ Preguntas de desarrollo'],
+    ['test', '📝 Test'],
+  ];
+  const starCount = (d) => STEPS.filter(([k]) => d.progress?.[k]).length;
+  const starsHtml = (d) => STEPS.map(([k]) => (d.progress?.[k] ? '⭐' : '<span class="star-off">☆</span>')).join('');
+  function markStep(deck, key) {
+    deck.progress = deck.progress || {};
+    if (deck.progress[key]) return false;
+    deck.progress[key] = todayStr();
+    P().points += 25;
+    save();
+    setTimeout(() => toast(starCount(deck) === STEPS.length ? '🏆 ¡Tema completo! Tienes las 5 estrellas' : '⭐ ¡Estrella conseguida! +25 puntos'), 300);
+    return true;
+  }
+
+  // Dictado por voz (si el navegador lo permite).
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let dictation = null;
+  function stopDictation() { if (dictation) { try { dictation.stop(); } catch (e) { /* nada */ } dictation = null; } }
+  function toggleDictation(textarea, btn) {
+    if (dictation) { stopDictation(); return; }
+    const r = new SpeechRec();
+    r.lang = 'es-ES';
+    r.continuous = true;
+    r.interimResults = false;
+    r.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        const t = e.results[i][0].transcript.trim();
+        if (t) textarea.value += (textarea.value && !/\s$/.test(textarea.value) ? ' ' : '') + t;
+      }
+      textarea.dispatchEvent(new Event('input'));
     };
-    const send = async (withFallbacks) => {
-      const headers = {
-        'content-type': 'application/json',
-        'x-api-key': cfg.key,
-        'anthropic-version': '2026-10-21',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      };
-      const b = { ...body };
-      if (withFallbacks) { headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; b.fallbacks = 'default'; }
-      return fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers, body: JSON.stringify(b) });
-    };
-    onStatus(`Claude está leyendo el tema… (puede tardar 1 o 2 minutos)`);
-    let res;
-    try {
-      res = await send(model.fallbacks);
-      // Si la petición con "fallbacks" no se acepta, se repite sin ella.
-      if (res.status === 400 && model.fallbacks) res = await send(false);
-    } catch (e) {
-      throw new Error('No se pudo conectar con Claude. Comprueba la conexión a internet.');
-    }
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const msg = json?.error?.message || `error ${res.status}`;
-      if (res.status === 401) throw new Error('La clave de la API no es válida');
-      if (/credit balance/i.test(msg)) throw new Error('No queda saldo en la cuenta de la API (console.anthropic.com → Billing)');
-      if (res.status === 429) throw new Error('Demasiadas peticiones seguidas. Espera un minuto y vuelve a probar.');
-      throw new Error(`Claude devolvió un error: ${msg}`);
-    }
-    if (json.stop_reason === 'refusal') throw new Error('Claude no ha querido procesar este contenido');
-    if (json.stop_reason === 'max_tokens') throw new Error('La respuesta salió demasiado larga. Prueba con menos fotos.');
-    const out = (json.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('');
-    const result = parseAiResult(out);
-    const u = json.usage || {};
-    const cost = ((u.input_tokens || 0) * model.price[0] + (u.output_tokens || 0) * model.price[1]) / 1e6;
-    return { ...result, cost };
+    r.onerror = (e) => { if (e.error === 'not-allowed') toast('Hay que dar permiso al micrófono'); };
+    r.onend = () => { dictation = null; btn.textContent = '🎤 Dictar'; btn.classList.remove('on'); };
+    try { r.start(); } catch (e) { toast('No se pudo empezar a dictar'); return; }
+    dictation = r;
+    btn.textContent = '⏹ Parar dictado';
+    btn.classList.add('on');
   }
 
   // ---------- Aprender: esquema, resumen (con audio), fotos y vídeos ----------
@@ -1823,6 +2223,16 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
   function viewEdit(id) {
     const deck = getDeck(id);
     if (!deck) return go('#/');
+    const aiDoneHtml = () => {
+      const parts = [
+        deck.explain && `📖 explicación (${deck.explain.apartados.length} apartados)`,
+        deck.lesson?.outline && '🗺️ esquema',
+        deck.lesson?.summary && '📝 resumen',
+        deck.dev?.length && `✍️ ${deck.dev.length} preguntas de desarrollo`,
+        deck.cards.length && `🃏 ${deck.cards.length} tarjetas`,
+      ].filter(Boolean);
+      return parts.length ? `<p class="small ok-line">Ya preparado: ${parts.join(' · ')}</p>` : '';
+    };
     deck.photos = deck.photos || [];
     app.innerHTML = `
       <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
@@ -1862,11 +2272,12 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
 
       <div class="card ai">
         <h2 style="margin-top:0">🤖 Preparar el tema con IA (Claude)</h2>
-        <p class="muted small">Claude lee las fotos (o el texto) y hace el <b>esquema</b>, el <b>resumen</b> y las <b>preguntas</b>. Revisa siempre el resultado.</p>
+        <p class="muted small">Claude lee las páginas (o el texto) y prepara la <b>explicación</b> con ejemplos, el <b>esquema</b>, el <b>resumen</b>, las <b>preguntas de desarrollo</b> y las <b>tarjetas</b>. Revisa siempre el resultado.</p>
+        <div id="aiDone">${aiDoneHtml()}</div>
         ${aiSettings().key ? `
           <button class="btn primary block" id="aiAuto">✨ Hacerlo automáticamente</button>
           <div id="aiStatus" class="muted small" style="margin-top:6px"></div>
-          <p class="muted small">Usa tu clave de la API (Zona padres). Cada tema cuesta unos céntimos.</p>
+          <p class="muted small">Usa tu clave de la API (Zona padres). Cada tema cuesta unos céntimos y tarda uno o dos minutos.</p>
           <details><summary class="small"><b>O hacerlo con tu app de Claude (sin coste extra con tu plan)</b></summary>` : `
           <h3 style="margin:12px 0 6px;font-size:1rem">Con tu app de Claude (sin coste extra con tu plan)</h3>`}
           <ol class="steps small">
@@ -1875,7 +2286,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
             <li>En Claude, si no aparecen las instrucciones, mantén pulsado el cuadro de texto y elige <b>Pegar</b>. Envía el mensaje.
               ${deck.photos.length ? '<br>Si las fotos no llegan, adjúntalas desde la galería con el clip 📎.' : ''}
               <br><a href="https://claude.ai/new" target="_blank" rel="noopener">Abrir Claude</a></li>
-            <li>Cuando Claude responda, pulsa <b>Copiar</b> en su bloque de código, vuelve aquí y pégalo:
+            <li>Cuando Claude termine (la respuesta es larga), pulsa <b>Copiar</b> en su bloque de código, vuelve aquí y pégalo:
               <textarea id="aiPaste" placeholder="Pega aquí la respuesta de Claude" style="min-height:90px;margin-top:6px"></textarea>
               <button class="btn primary block" id="aiApply" style="margin-top:6px">Usar la respuesta de Claude</button></li>
           </ol>
@@ -2044,18 +2455,21 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
 
     // IA: aplicar resultado (esquema, resumen y propuestas de tarjetas)
     const applyAi = (r) => {
-      const had = deck.lesson?.outline || deck.lesson?.summary;
+      const had = deck.lesson?.outline || deck.lesson?.summary || deck.explain;
       deck.lesson = { outline: r.esquema || deck.lesson?.outline || '', summary: r.resumen || deck.lesson?.summary || '' };
+      if (r.explicacion) deck.explain = r.explicacion;
+      if (r.desarrollo.length) deck.dev = r.desarrollo;
       save();
+      $('#aiDone').innerHTML = aiDoneHtml();
       $('#lo').value = deck.lesson.outline;
       $('#ls').value = deck.lesson.summary;
       const box = $('#aiProposals');
       if (r.tarjetas.length) showProposals(box, r.tarjetas, deck, () => viewEdit(id));
       else box.innerHTML = '';
-      toast(`Esquema y resumen ${had ? 'sustituidos' : 'listos'}${r.tarjetas.length ? `, y ${r.tarjetas.length} preguntas para revisar` : ''}`);
+      toast(`Tema ${had ? 'actualizado' : 'preparado'}${r.tarjetas.length ? `: revisa las ${r.tarjetas.length} tarjetas propuestas` : ''}`);
       box.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
-    const confirmReplace = () => !(deck.lesson?.outline || deck.lesson?.summary) || confirm('Ya hay esquema o resumen. ¿Sustituirlos por los de Claude?');
+    const confirmReplace = () => !(deck.lesson?.outline || deck.lesson?.summary || deck.explain) || confirm('Ya hay material preparado (explicación, esquema o resumen). ¿Sustituirlo por el nuevo de Claude?');
     if ($('#aiAuto')) {
       $('#aiAuto').onclick = async () => {
         if (!deck.photos.length && !$('#ocrText').value.trim()) return toast('Añade fotos o el texto del tema primero');
@@ -2066,6 +2480,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
         try {
           const r = await aiGenerate(deck, (t) => { st.textContent = t; });
           st.textContent = `Hecho. Coste aproximado: ${r.cost.toLocaleString('es-ES', { maximumFractionDigits: 3 })} $`;
+          if (!r.explicacion) toast('Claude no ha devuelto la explicación: prueba otra vez');
           applyAi(r);
         } catch (e) {
           st.textContent = '';
@@ -2215,6 +2630,7 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
   }
   function route() {
     speech.stop();
+    stopDictation();
     keyHandler = null;
     const parts = (location.hash.replace(/^#\/?/, '') || '').split('/');
     window.scrollTo(0, 0);
@@ -2227,6 +2643,9 @@ Responde SOLO con un bloque de código JSON con esta forma exacta:
       case 'deck': return viewDeck(parts[1]);
       case 'photos': return viewPhotos(parts[1]);
       case 'learn': return viewLearn(parts[1]);
+      case 'explain': return viewExplain(parts[1]);
+      case 'blank': return viewBlank(parts[1]);
+      case 'dev': return viewDev(parts[1], parts[2] != null && parts[2] !== '' ? Number(parts[2]) : null);
       case 'study': return viewStudy(parts[1]);
       case 'quiz': return viewQuiz(parts[1], parts[2] === 'write' ? 'write' : 'choice');
       case 'math': return parts[1] === 'play' ? playMath() : viewMath();

@@ -11,11 +11,17 @@ Versión pensada para **un solo alumno** en su propio dispositivo.
 - **📷 Fotos y capturas**: para libros que solo se ven en la web o app de la editorial se suben capturas de pantalla (varias a la vez, ordenadas por la hora en que se hicieron). Se pueden reordenar y **recortar** (barra de estado, botones del visor, márgenes), con el mismo recorte para todas.
 - **🔎 Buscador de temas** por curso, asignatura, editorial, número de tema o cualquier palabra del contenido.
 - **🔤 Texto del tema**: viene del PDF, se lee de las fotos (OCR con [Tesseract.js](https://github.com/naptha/tesseract.js), en el navegador) o se pega a mano.
-- **🤖 Preparar el tema con IA (Claude)**: esquema, resumen y preguntas.
+- **🧭 Ruta de estudio por tema** (una ⭐ por paso):
+  1. **📖 Entender el tema**: explicación por pantallas, como la de un buen profesor. Lleva introducción, cada apartado explicado con un ejemplo de la vida cotidiana, "¿Sabías que…?" y una pregunta de comprensión para poder seguir. Termina con la línea del tiempo, las causas y consecuencias y un glosario, y todo se puede escuchar.
+  2. **🗺️ Esquema en blanco**: las ideas del esquema aparecen tapadas y hay que recordarlas antes de destaparlas (opcionalmente también los títulos), para memorizar la estructura del tema.
+  3. **🃏 Tarjetas**: repaso espaciado.
+  4. **✍️ Preguntas de desarrollo** tipo examen. Se escribe o se dicta la respuesta. Con clave de API, Claude la corrige (nota, lo que está bien, lo que falta, consejo y puntos clave incluidos). Sin clave, el alumno se autoevalúa con los puntos clave y ve la respuesta modelo.
+  5. **📝 Test**: la estrella se consigue con un 7 o más.
+- **🤖 Preparar el tema con IA (Claude)**: con una sola petición crea la explicación, el esquema, el resumen, las preguntas de desarrollo con respuesta modelo y puntos clave, y las tarjetas.
   - **Con la app de Claude (copiar y pegar)**: se envían las fotos y unas instrucciones a la app de Claude y se pega la respuesta. Sin coste extra para quien ya tiene un plan de Claude.
   - **Automática con la API de Claude**: se guarda una clave de la API (console.anthropic.com, de pago por uso; los planes Free y Pro no incluyen créditos de API) en *Zona padres → Inteligencia artificial*. La clave se guarda solo en el dispositivo y la app llama directamente a `api.anthropic.com`. Conviene poner un límite de gasto en la consola.
 - **✨ Borrador sin IA**: esquema, resumen y tarjetas propuestas a partir del texto mediante reglas (definiciones, apartados y frases clave). Siempre hay que revisarlo.
-- **📖 Aprender antes de preguntar**: esquema, resumen con conceptos resaltados que se puede **escuchar en voz alta**, fotos del tema y **vídeos de YouTube**.
+- **📚 Material del tema**: esquema, resumen con conceptos resaltados que se puede **escuchar en voz alta**, páginas del libro y **vídeos de YouTube**.
 - **🃏 Tarjetas de repaso** con repaso espaciado (sistema Leitner, 5 niveles: 0, 1, 3, 7 y 14 días).
 - **📝 Test** de hasta 10 preguntas, eligiendo o escribiendo la respuesta (sin tener en cuenta mayúsculas ni tildes), con nota final.
 - **➗ Cálculo mental adaptado al curso**: sumas y restas; tablas y divisiones; porcentajes y fracción de un número; y, en ESO y Bachillerato, números enteros, potencias y raíces.
