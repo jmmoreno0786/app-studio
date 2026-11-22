@@ -958,8 +958,22 @@
         <p class="muted">Como en el examen: responde con tus palabras, de forma ordenada y completa. ${aiSettings().key ? 'Claude te corregirá y te dirá qué mejorar.' : 'Después compara con la respuesta modelo.'}</p>
         ${deck.dev.map((d, i) => `<a class="card deck dev-q" href="#/dev/${deck.id}/${i}">
           <div class="name">${i + 1}. ${esc(d.q)}</div>
-          <div class="muted small">${d.best != null ? `Mejor nota: <b>${d.best.toLocaleString('es-ES')}</b> ${d.best >= 5 ? '✅' : ''}` : 'Sin responder todavía'}</div>
-        </a>`).join('')}`;
+          <div class="muted small">${d.best != null ? `Mejor nota: <b>${d.best.toLocaleString('es-ES')}</b> ${d.best >= 8 ? '🌟' : d.best >= 5 ? '✅' : ''}` : (d.last ? 'Empezada, sin corregir' : 'Sin responder todavía')}</div>
+        </a>`).join('')}
+        ${deck.dev.some((d) => d.last || d.best != null) ? `
+          <button class="btn block" id="devReset" style="margin-top:4px">🔄 Reiniciar las que tengan menos de un 8</button>
+          <p class="muted small center">Borra esas respuestas para volver a escribirlas. Las de 8 o más se mantienen.</p>` : ''}`;
+      if ($('#devReset')) {
+        $('#devReset').onclick = () => {
+          const toReset = deck.dev.filter((d) => (d.best == null || d.best < 8) && (d.last || d.best != null));
+          if (!toReset.length) return toast('Todas tienen un 8 o más. ¡Muy bien! 🌟');
+          if (!confirm(`Se borrarán ${toReset.length} ${toReset.length === 1 ? 'respuesta' : 'respuestas'} con nota menor de 8 (o sin corregir) para volver a escribirlas. ¿Seguir?`)) return;
+          toReset.forEach((d) => { d.last = ''; d.best = null; });
+          save();
+          viewDev(id, null);
+          toast(`${toReset.length} ${toReset.length === 1 ? 'pregunta reiniciada' : 'preguntas reiniciadas'}`);
+        };
+      }
       return;
     }
     const q = deck.dev[qi];
