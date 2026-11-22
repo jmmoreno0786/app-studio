@@ -160,7 +160,7 @@
   const newCard = (q, a) => ({ id: uid(), q, a, box: 1, due: todayStr() });
   const newDeck = (fields) => ({
     id: uid(), name: '', emoji: '📘', course: '', subject: '', publisher: '', unit: '',
-    cards: [], photos: [], ocrText: '', ...fields,
+    cards: [], photos: [], ocrText: '', lesson: { outline: '', summary: '' }, videos: [], ...fields,
   });
   const starterDecks = (courseId) => (STARTER_BY_COURSE[courseId] || []).map((d) => newDeck({
     name: d.name, emoji: d.emoji, subject: d.subject || '', course: courseId,
@@ -231,6 +231,7 @@
       tema: {
         name: deck.name, emoji: deck.emoji, course: deck.course, subject: deck.subject,
         publisher: deck.publisher, unit: deck.unit, cards: deck.cards.map((c) => ({ q: c.q, a: c.a })),
+        lesson: deck.lesson || { outline: '', summary: '' }, videos: (deck.videos || []).map((v) => ({ yt: v.yt, title: v.title })),
       },
     };
     const filename = `${deck.unit ? "" : "tema-"}${slug(deckTitle(deck))}.json`;
@@ -258,6 +259,8 @@
           name: String(t.name), emoji: String(t.emoji || subjectEmoji(t.subject)), course: String(t.course || ''),
           subject: String(t.subject || ''), publisher: String(t.publisher || ''), unit: String(t.unit || ''),
           cards: t.cards.filter((c) => c && c.q && c.a).map((c) => newCard(String(c.q), String(c.a))),
+          lesson: { outline: String(t.lesson?.outline || ''), summary: String(t.lesson?.summary || '') },
+          videos: (Array.isArray(t.videos) ? t.videos : []).filter((v) => v && /^[\w-]{11}$/.test(v.yt)).map((v) => ({ id: uid(), yt: v.yt, title: String(v.title || 'Vídeo') })),
         });
         P().decks.push(deck);
         save();
@@ -532,7 +535,12 @@
       <a class="back" href="#/">← Inicio</a>
       <h1 style="margin-bottom:2px">${esc(deck.emoji || '📘')} ${esc(deckTitle(deck))}</h1>
       <p class="muted">${esc(deckMeta(deck))}${deckMeta(deck) ? '<br>' : ''}${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
-      ${deck.photos?.length ? `<a class="btn block" href="#/photos/${deck.id}" style="margin-bottom:12px">📖 Ver fotos del tema (${deck.photos.length})</a>` : ''}
+      ${hasLesson(deck) ? `
+      <div class="card learn">
+        <h2 style="margin-top:0">📖 Aprender</h2>
+        <p class="muted small">Esquema, resumen que se puede escuchar${deck.photos?.length ? ', fotos' : ''}${deck.videos?.length ? ' y vídeos' : ''}. Empieza por aquí antes de las preguntas.</p>
+        <a class="btn primary block" href="#/learn/${deck.id}">Empezar a aprender</a>
+      </div>` : `<p class="muted small">💡 En "Editar este tema" puedes añadir un esquema, un resumen y vídeos para estudiarlo antes de las preguntas.</p>`}
       ${deck.cards.length === 0 ? `<div class="card">Este tema todavía no tiene tarjetas. Añádelas en "Editar este tema": a mano o a partir de las fotos.</div>` : `
       <div class="card">
         <h2 style="margin-top:0">🃏 Tarjetas</h2>
@@ -1008,6 +1016,245 @@
     };
   }
 
+  // ---------- Aprender: esquema, resumen (con audio), fotos y vídeos ----------
+  const hasLesson = (d) => !!(d.lesson?.outline || d.lesson?.summary || d.photos?.length || d.videos?.length);
+
+  // Formato sencillo: "# Título", "- punto", "  - subpunto", "**resaltado**"; líneas seguidas = un párrafo.
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<mark>$1</mark>');
+  function renderRich(text) {
+    const out = [];
+    let para = [];
+    let inList = false;
+    const flushPara = () => { if (para.length) { out.push(`<p data-say>${inline(para.join(' '))}</p>`); para = []; } };
+    const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      const line = raw.replace(/\s+$/, '');
+      const t = line.trim();
+      if (!t) { flushPara(); closeList(); continue; }
+      let m;
+      if ((m = t.match(/^#+\s*(.+)$/))) { flushPara(); closeList(); out.push(`<h3 data-say>${inline(m[1])}</h3>`); continue; }
+      if ((m = line.match(/^(\s*)[-•*]\s+(.+)$/))) {
+        flushPara();
+        if (!inList) { out.push('<ul>'); inList = true; }
+        out.push(`<li data-say class="${m[1].length >= 2 ? 'sub' : ''}">${inline(m[2])}</li>`);
+        continue;
+      }
+      closeList();
+      para.push(t);
+    }
+    flushPara();
+    closeList();
+    return out.join('');
+  }
+  const plain = (s) => String(s).replace(/\*\*/g, '').replace(/^#+\s*/gm, '').replace(/^\s*[-•*]\s+/gm, '');
+
+  function parseYouTube(url) {
+    const s = String(url || '').trim();
+    const m = s.match(/(?:youtube(?:-nocookie)?\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([\w-]{11})/i);
+    return m ? m[1] : (/^[\w-]{11}$/.test(s) ? s : null);
+  }
+
+  // Texto de OCR → líneas limpias (une palabras cortadas con guion al final de línea).
+  const ocrLines = (text) => String(text || '').replace(/-\n(?=\p{Ll})/gu, '').split(/\r?\n/).map((l) => l.trim());
+  const splitSentences = (p) => p.split(/(?<=[.!?])\s+(?=[¿¡]?\p{Lu})/u).map((x) => x.trim()).filter(Boolean);
+  const shorten = (s, n) => (s.length <= n ? s : s.slice(0, s.lastIndexOf(' ', n) > 20 ? s.lastIndexOf(' ', n) : n).replace(/[,;:]$/, '') + '…');
+  const stripArticle = (s) => s.replace(/^(el|la|los|las|un|una|unos|unas)\s+/i, '');
+
+  // Borrador automático de esquema y resumen (sin IA): detecta apartados, frases clave y conceptos.
+  // Pensado para poder sustituirlo más adelante por una versión con IA.
+  function generateLesson(text, fallbackTitle) {
+    const lines = ocrLines(text);
+    const isJunk = (l) => l.length < 3 || (l.match(/\p{L}/gu) || []).length < l.length * 0.5;
+    const isHeading = (l, next) => {
+      if (l.length > 70 || isJunk(l)) return false;
+      if (/^(tema|unidad|bloque|cap[ií]tulo)\s+\d+/i.test(l)) return true;
+      if (/[.,;:]$/.test(l) || !/^[¿¡]?(\d+(\.\d+)*\.?\s+)?\p{Lu}/u.test(l)) return false;
+      return l.split(/\s+/).length <= 8 && (!next || !/^\p{Ll}/u.test(next));
+    };
+    const sections = [];
+    let cur = null;
+    let para = [];
+    const flush = () => {
+      if (para.length) {
+        if (!cur) { cur = { title: fallbackTitle || 'Resumen', paras: [] }; sections.push(cur); }
+        cur.paras.push(para.join(' '));
+        para = [];
+      }
+    };
+    lines.forEach((l, i) => {
+      if (!l) return flush();
+      if (isJunk(l)) return;
+      if (isHeading(l, lines.slice(i + 1).find(Boolean))) {
+        flush();
+        cur = { title: l.replace(/\s+/g, ' '), paras: [] };
+        sections.push(cur);
+        return;
+      }
+      para.push(l);
+    });
+    flush();
+
+    const DEF_ES = /^([^,;:()]{2,60}?)\s+(es|son)\s+(.{5,})$/;
+    const DEF_NAME = /^(.{3,80}?)\s+se\s+(llaman?|denominan?|conocen?\s+como)\s+(.{2,})$/i;
+    const DEF_COLON = /^([^:]{3,70}):\s+(.{2,})$/;
+    const DEMONSTRATIVE = /^(est[aeo]s?|es[aeo]s?|aquel(l[ao]s?)?|ello|todo esto)\b/i;
+    const KEY = /\b(importantes?|principal(es)?|fundamental(es)?|b[aá]sic[ao]s?|clasifica|divide|tipos?|formad[oa]s? por|consiste|caracter[ií]stica|funci[oó]n|causas?|consecuencias?|siempre|nunca)\b/i;
+    const terms = new Set();
+    const outline = [];
+    const summary = [];
+
+    for (const sec of sections) {
+      const cands = [];
+      sec.paras.forEach((p) => splitSentences(p).forEach((s, j) => {
+        const clean = s.replace(/^[•·\-–—*]\s*/, '');
+        if (clean.length < 12) return;
+        let score = 0, bullet = null, m;
+        const vague = DEMONSTRATIVE.test(clean);
+        if (!vague && (m = clean.match(DEF_NAME))) {
+          const term = m[3].replace(/[.;]+$/, '');
+          if (term.split(' ').length <= 5) terms.add(term);
+          score += 3; bullet = `**${term.charAt(0).toUpperCase() + term.slice(1)}**: ${lcFirst(m[1])}`;
+        } else if ((m = clean.match(DEF_COLON)) && m[1].split(' ').length <= 4) {
+          score += 3; bullet = `**${m[1]}**: ${shorten(m[2].replace(/[.;]+$/, ''), 90)}`;
+          if (m[1].split(' ').length <= 5) terms.add(m[1]);
+        } else if (!vague && (m = clean.match(DEF_ES)) && m[1].split(' ').length <= 7) {
+          const term = stripArticle(m[1]);
+          terms.add(term);
+          score += 3; bullet = `**${term.charAt(0).toUpperCase() + term.slice(1)}**: ${shorten(m[3].replace(/[.;]+$/, ''), 90)}`;
+        }
+        if (KEY.test(clean)) score += 2;
+        if (j === 0) score += 1;
+        if (clean.length > 220) score -= 2;
+        cands.push({ s: clean, score, bullet, order: cands.length, first: cands.length === 0 });
+      }));
+      if (!cands.length) continue;
+      // Frases clave del apartado + siempre la primera (da contexto).
+      let chosen = cands.filter((c) => c.score >= 2 && !c.first).sort((a, b) => b.score - a.score).slice(0, 4);
+      // Si el apartado queda muy corto, añade la siguiente frase con más puntuación.
+      if (!chosen.length && cands.length > 1) chosen = [cands.slice(1).sort((a, b) => b.score - a.score || a.order - b.order)[0]];
+      chosen = [cands[0], ...chosen].sort((a, b) => a.order - b.order);
+      outline.push(`# ${sec.title}`);
+      chosen.forEach((c) => outline.push(`- ${c.bullet || shorten(c.s.replace(/[.]$/, ''), 100)}`));
+      outline.push('');
+      summary.push(`# ${sec.title}`, chosen.map((c) => c.s).join(' '), '');
+    }
+
+    // Resalta los conceptos clave en el resumen (solo la primera vez que aparecen).
+    const sorted = [...terms].filter((t) => t.length >= 3).sort((a, b) => b.length - a.length);
+    const sumLines = summary.slice();
+    for (const t of sorted) {
+      const re = new RegExp(`(?<![\\p{L}*])(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})(?![\\p{L}*])`, 'iu');
+      const i = sumLines.findIndex((l) => !l.startsWith('#') && re.test(l));
+      if (i >= 0) sumLines[i] = sumLines[i].replace(re, '**$1**');
+    }
+    return { outline: outline.join('\n').trim(), summary: sumLines.join('\n').trim() };
+  }
+
+  // Lectura en voz alta con la voz del dispositivo.
+  const speech = {
+    supported: 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window,
+    stop() { if (this.supported) { try { speechSynthesis.cancel(); } catch (e) { /* nada */ } } },
+    voice() {
+      const vs = this.supported ? speechSynthesis.getVoices() : [];
+      return vs.find((v) => v.lang === 'es-ES') || vs.find((v) => /^es/i.test(v.lang)) || null;
+    },
+    // Lee una lista de bloques; avisa de qué bloque está leyendo y cuándo termina.
+    play(blocks, rate, onBlock, onEnd) {
+      this.stop();
+      const voice = this.voice();
+      const queue = [];
+      blocks.forEach((text, bi) => splitSentences(text).forEach((s) => queue.push({ s, bi })));
+      if (!queue.length) return onEnd();
+      queue.forEach(({ s, bi }, k) => {
+        const u = new SpeechSynthesisUtterance(s);
+        u.lang = 'es-ES';
+        if (voice) u.voice = voice;
+        u.rate = rate;
+        u.onstart = () => onBlock(bi);
+        if (k === queue.length - 1) { u.onend = onEnd; u.onerror = onEnd; }
+        speechSynthesis.speak(u);
+      });
+    },
+  };
+
+  function viewLearn(id) {
+    const deck = getDeck(id);
+    if (!deck) return go('#/');
+    const L = deck.lesson || {};
+    const sections = [
+      L.outline && ['outline', '📋 Esquema'],
+      L.summary && ['summary', '📝 Resumen'],
+      deck.photos?.length && ['photos', '📷 Fotos'],
+      deck.videos?.length && ['videos', '🎬 Vídeos'],
+    ].filter(Boolean);
+    app.innerHTML = `
+      <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+      <h1 style="margin-bottom:2px">📖 ${esc(deckTitle(deck))}</h1>
+      <p class="muted">${esc(deckMeta(deck))}</p>
+      ${sections.length > 1 ? `<div class="chips" style="margin-bottom:12px">${sections.map(([k, label]) => `<button class="chip" data-jump="${k}" style="padding:0 14px">${label}</button>`).join('')}</div>` : ''}
+      ${!sections.length ? '<div class="card muted">Este tema todavía no tiene explicación. Añádela en "Editar este tema".</div>' : ''}
+
+      ${L.outline ? `<section class="card rich" id="sec-outline"><h2 style="margin-top:0">📋 Esquema</h2>${renderRich(L.outline)}</section>` : ''}
+
+      ${L.summary ? `<section class="card rich" id="sec-summary">
+        <h2 style="margin-top:0">📝 Resumen</h2>
+        ${speech.supported ? `<div class="row tts">
+          <button class="btn primary" id="ttsPlay">🔊 Escuchar</button>
+          <button class="btn" id="ttsPause" hidden>⏸ Pausa</button>
+          <button class="btn" id="ttsStop" hidden>⏹ Parar</button>
+          <select id="ttsRate" aria-label="Velocidad"><option value="1">Velocidad normal</option><option value="0.8">Más despacio</option><option value="1.2">Más rápido</option></select>
+        </div>` : ''}
+        <div id="summary">${renderRich(L.summary)}</div>
+      </section>` : ''}
+
+      ${deck.photos?.length ? `<section class="card" id="sec-photos">
+        <h2 style="margin-top:0">📷 Fotos del tema</h2>
+        <div class="thumbs">${deck.photos.map((pid, i) => `<a class="thumb" href="#/photos/${deck.id}"><img data-photo="${pid}" alt="Foto ${i + 1}"></a>`).join('')}</div>
+        <a class="btn block" href="#/photos/${deck.id}" style="margin-top:10px">Ver las fotos en grande</a>
+      </section>` : ''}
+
+      ${deck.videos?.length ? `<section class="card" id="sec-videos">
+        <h2 style="margin-top:0">🎬 Vídeos</h2>
+        ${deck.videos.map((v) => `<div class="video">
+          <div class="video-title">${esc(v.title)}</div>
+          <div class="video-frame"><iframe src="https://www.youtube-nocookie.com/embed/${esc(v.yt)}" title="${esc(v.title)}" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+          <a class="muted small" href="https://www.youtube.com/watch?v=${esc(v.yt)}" target="_blank" rel="noopener">Abrir en YouTube</a>
+        </div>`).join('')}
+      </section>` : ''}
+
+      <div class="card center">
+        <h2 style="margin-top:0">¿Ya lo has estudiado? 💪</h2>
+        <p class="muted small">Ahora comprueba lo que sabes.</p>
+        ${deck.cards.length ? `<div class="row">
+          <a class="btn primary" href="#/study/${deck.id}">🃏 Repasar tarjetas</a>
+          <a class="btn" href="#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}">📝 Hacer el test</a>
+        </div>` : '<p class="muted small">Este tema aún no tiene tarjetas de preguntas.</p>'}
+      </div>
+    `;
+    hydratePhotos(app);
+    $$('[data-jump]').forEach((b) => { b.onclick = () => $(`#sec-${b.dataset.jump}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+
+    if (L.summary && speech.supported) {
+      const blocks = $$('#summary [data-say]');
+      const play = $('#ttsPlay'), pause = $('#ttsPause'), stop = $('#ttsStop');
+      let paused = false;
+      const mark = (i) => {
+        blocks.forEach((b, k) => b.classList.toggle('reading', k === i));
+        if (blocks[i]) blocks[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
+      const reset = () => { mark(-1); play.hidden = false; pause.hidden = true; stop.hidden = true; paused = false; pause.textContent = '⏸ Pausa'; };
+      play.onclick = () => {
+        play.hidden = true; pause.hidden = false; stop.hidden = false;
+        speech.play(blocks.map((b) => plain(b.textContent)), Number($('#ttsRate').value), mark, reset);
+      };
+      pause.onclick = () => {
+        if (paused) { speechSynthesis.resume(); pause.textContent = '⏸ Pausa'; } else { speechSynthesis.pause(); pause.textContent = '▶️ Seguir'; }
+        paused = !paused;
+      };
+      stop.onclick = () => { speech.stop(); reset(); };
+    }
+  }
+
   // ---------- Editar tema: datos, fotos, texto y tarjetas ----------
   // Propone tarjetas a partir de frases típicas de libro de texto. Siempre hay que revisarlas.
   function proposeCards(text) {
@@ -1032,6 +1279,7 @@
       // "Funciones vitales: nutrición, relación y reproducción."
       if ((m = s.match(/^([^:]{3,70}):\s+(.{2,200})$/))) { add(m[1], m[2]); continue; }
       // "Las células sin núcleo se llaman procariotas."
+      if (/^(est[aeo]s?|es[aeo]s?|aquel(l[ao]s?)?|ello|todo esto)\b/i.test(s)) continue;
       if ((m = s.match(/^(.{3,80}?)\s+se\s+(llaman?|denominan?|conocen?\s+como)\s+(.{2,150})$/i))) {
         add(`¿Cómo se ${m[2].toLowerCase()} ${lcFirst(m[1])}?`.replace(/ como /, ' '), m[3]);
         continue;
@@ -1111,16 +1359,47 @@
       </div>
 
       <div class="card">
-        <h2 style="margin-top:0">🔤 Texto de las fotos</h2>
-        <p class="muted small">La app puede leer el texto de las fotos (necesita internet la primera vez). Revisa el texto: puede tener algún error si la foto no es buena.</p>
+        <h2 style="margin-top:0">🔤 Texto del tema</h2>
+        <p class="muted small">La app puede leer el texto de las fotos (necesita internet la primera vez). Revisa el texto: puede tener algún error si la foto no es buena. También puedes pegar o escribir el texto directamente.</p>
         <button class="btn block" id="ocr" ${deck.photos.length ? '' : 'disabled'}>🔤 Sacar texto de las fotos</button>
         <div id="ocrStatus" class="muted small" style="margin-top:6px"></div>
-        <div id="ocrArea" ${deck.ocrText ? '' : 'hidden'}>
+        <div id="ocrArea">
           <label for="ocrText">Texto (puedes corregirlo)</label>
           <textarea id="ocrText" style="min-height:200px">${esc(deck.ocrText)}</textarea>
           <button class="btn primary block" id="propose" style="margin-top:10px">✨ Proponer tarjetas con este texto</button>
         </div>
         <div id="proposals"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">📖 Explicación: esquema y resumen</h2>
+        <p class="muted small">Es lo que se ve en "Aprender" antes de las preguntas. La app puede proponer un borrador a partir del texto del tema; luego corrígelo a mano.</p>
+        <button class="btn block" id="genLesson">✨ Generar esquema y resumen a partir del texto</button>
+        <label for="lo">Esquema</label>
+        <textarea id="lo" placeholder="# Apartado&#10;- Idea importante&#10;- **Concepto**: explicación">${esc(deck.lesson?.outline || '')}</textarea>
+        <label for="ls">Resumen</label>
+        <textarea id="ls" style="min-height:200px" placeholder="# Apartado&#10;Texto del resumen con las **palabras clave** resaltadas.">${esc(deck.lesson?.summary || '')}</textarea>
+        <p class="muted small">Formato: <code># Título</code> para un apartado, <code>- texto</code> para un punto y <code>**palabra**</code> para resaltar.</p>
+        <button class="btn primary block" id="saveLesson">Guardar explicación</button>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">🎬 Vídeos</h2>
+        <ul class="list">
+          ${(deck.videos || []).map((v) => `<li>
+            <span class="qa">▶️ ${esc(v.title)} <a class="muted small" href="https://www.youtube.com/watch?v=${esc(v.yt)}" target="_blank" rel="noopener">ver en YouTube</a></span>
+            <button class="icon-btn" data-delvid="${v.id}" aria-label="Quitar vídeo">🗑️</button>
+          </li>`).join('') || '<li class="muted">Todavía no hay vídeos</li>'}
+        </ul>
+        <form id="vid">
+          <label for="vu">Enlace de YouTube</label>
+          <input type="url" id="vu" required placeholder="https://www.youtube.com/watch?v=…">
+          <label for="vt">Título (opcional)</label>
+          <input type="text" id="vt" maxlength="80" placeholder="Ej.: La célula explicada fácil">
+          <button class="btn primary block" style="margin-top:12px">Añadir vídeo</button>
+        </form>
+        <a class="btn block" style="margin-top:10px" target="_blank" rel="noopener" href="https://www.youtube.com/results?search_query=${encodeURIComponent([deck.name, deck.subject, courseById(deck.course)?.label].filter(Boolean).join(' '))}">🔎 Buscar vídeos de este tema en YouTube</a>
+        <p class="muted small">Mira el vídeo antes de añadirlo: que sea correcto y adecuado para su edad. Copia el enlace con "Compartir → Copiar enlace" en YouTube.</p>
       </div>
 
       <div class="card">
@@ -1214,7 +1493,6 @@
       if (ok) {
         $('#ocrStatus').textContent = deck.ocrText ? 'Texto listo. Revísalo y pulsa "Proponer tarjetas".' : 'No se encontró texto en las fotos.';
         $('#ocrText').value = deck.ocrText;
-        $('#ocrArea').hidden = !deck.ocrText;
       }
     };
     $('#ocrText').onchange = (e) => { deck.ocrText = e.target.value; save(); };
@@ -1253,6 +1531,46 @@
         toast(`${n} tarjetas añadidas`);
       };
     };
+
+    // Explicación (esquema y resumen)
+    $('#genLesson').onclick = () => {
+      const text = $('#ocrText').value.trim();
+      if (!text) return toast('Primero saca el texto de las fotos o pégalo en "Texto del tema"');
+      if (($('#lo').value.trim() || $('#ls').value.trim()) && !confirm('Ya hay esquema o resumen. ¿Sustituirlos por el borrador automático?')) return;
+      deck.ocrText = text;
+      const lesson = generateLesson(text, deck.name);
+      if (!lesson.outline && !lesson.summary) return toast('No he encontrado suficiente texto para hacer un resumen');
+      $('#lo').value = lesson.outline;
+      $('#ls').value = lesson.summary;
+      deck.lesson = lesson;
+      save();
+      toast('Borrador creado: revísalo y corrígelo si hace falta');
+    };
+    $('#saveLesson').onclick = () => {
+      deck.lesson = { outline: $('#lo').value.trim(), summary: $('#ls').value.trim() };
+      save();
+      toast('Explicación guardada');
+    };
+
+    // Vídeos
+    $('#vid').onsubmit = (e) => {
+      e.preventDefault();
+      const yt = parseYouTube($('#vu').value);
+      if (!yt) return toast('Ese enlace no parece de un vídeo de YouTube');
+      deck.videos = deck.videos || [];
+      if (deck.videos.some((v) => v.yt === yt)) return toast('Ese vídeo ya está añadido');
+      deck.videos.push({ id: uid(), yt, title: $('#vt').value.trim() || `Vídeo ${deck.videos.length + 1}` });
+      save();
+      viewEdit(id);
+      toast('Vídeo añadido');
+    };
+    $$('[data-delvid]').forEach((b) => {
+      b.onclick = () => {
+        deck.videos = deck.videos.filter((v) => v.id !== b.dataset.delvid);
+        save();
+        viewEdit(id);
+      };
+    });
 
     // Tarjetas a mano
     $('#add').onsubmit = (e) => {
@@ -1304,6 +1622,7 @@
     if (location.hash === hash) route(); else location.hash = hash;
   }
   function route() {
+    speech.stop();
     const parts = (location.hash.replace(/^#\/?/, '') || '').split('/');
     window.scrollTo(0, 0);
     if (!P() && data.profiles.length) data.activeId = data.profiles[0].id;
@@ -1314,6 +1633,7 @@
     switch (parts[0]) {
       case 'deck': return viewDeck(parts[1]);
       case 'photos': return viewPhotos(parts[1]);
+      case 'learn': return viewLearn(parts[1]);
       case 'study': return viewStudy(parts[1]);
       case 'quiz': return viewQuiz(parts[1], parts[2] === 'write' ? 'write' : 'choice');
       case 'math': return parts[1] === 'play' ? playMath() : viewMath();
