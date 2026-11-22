@@ -757,9 +757,12 @@
     if (!queue.length) queue = deck.cards.slice();
     queue = shuffle(queue);
     const total = queue.length;
-    let done = 0, right = 0, revealed = false;
+    let done = 0, right = 0, revealed = false, given = '';
+    // Modo "escribir": escribe o dicta la respuesta antes de verla. Modo "pensar": solo pensarla.
+    const writeMode = () => P().cardMode !== 'think';
 
     function render() {
+      stopDictation();
       if (!queue.length) {
         const firstStar = !deck.progress?.tarjetas;
         if (firstStar) setTimeout(() => markStep(deck, 'tarjetas'), 0);
@@ -781,19 +784,47 @@
         <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
         <div class="muted small">Tarjeta ${Math.min(done + 1, total)} de ${total}</div>
         <div class="progress"><div style="width:${(done / total) * 100}%"></div></div>
-        <div class="card flash" id="flash">
+        <div class="card flash ${writeMode() && !revealed ? 'no-tap' : ''}" id="flash">
           <div>${esc(card.q)}</div>
-          ${revealed ? `<div class="answer">${esc(card.a)}</div>` : '<div class="hint">Toca para ver la respuesta</div>'}
-          <div class="kbd-hint">Teclado: ${revealed ? '← No · → Sí' : 'espacio para girar'}</div>
+          ${revealed ? `<div class="answer">${esc(card.a)}</div>` : (writeMode() ? '' : '<div class="hint">Toca para ver la respuesta</div>')}
+          ${writeMode() ? '' : `<div class="kbd-hint">Teclado: ${revealed ? '← No · → Sí' : 'espacio para girar'}</div>`}
         </div>
         ${revealed ? `
+          ${writeMode() ? matchHtml(given, card.a) : ''}
           <p class="center muted">¿La sabías?</p>
           <div class="row">
             <button class="btn bad" id="no">❌ No</button>
             <button class="btn good" id="yes">✅ Sí</button>
-          </div>` : `<button class="btn primary block" id="reveal">Ver respuesta</button>`}
+          </div>
+          <div class="kbd-hint center">Teclado: ← No · → Sí</div>` : (writeMode() ? `
+          <form id="wf" class="card">
+            <label for="wa" style="margin-top:0">Tu respuesta</label>
+            <textarea id="wa" class="card-ans" rows="2" autocomplete="off" placeholder="Escríbela o díctala antes de verla">${esc(given)}</textarea>
+            <div class="row" style="margin-top:10px">
+              ${SpeechRec ? '<button type="button" class="btn" id="dict">🎤 Dictar</button>' : ''}
+              <button class="btn primary">Comprobar</button>
+            </div>
+            <button type="button" class="btn ghost block small-btn" id="dunno">No me acuerdo: ver respuesta</button>
+          </form>` : `<button class="btn primary block" id="reveal">Ver respuesta</button>`)}
+        <label class="check mode-toggle"><input type="checkbox" id="wm" ${writeMode() ? 'checked' : ''}> Escribir o dictar la respuesta antes de verla</label>
       `;
-      if (!revealed) {
+      $('#wm').onchange = (e) => { P().cardMode = e.target.checked ? 'write' : 'think'; save(); render(); };
+      if (!revealed && writeMode()) {
+        const ta = $('#wa');
+        ta.focus();
+        ta.oninput = () => { given = ta.value; };
+        // Enter comprueba (Mayúsculas + Enter hace salto de línea)
+        ta.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#wf').requestSubmit(); } };
+        if ($('#dict')) $('#dict').onclick = () => toggleDictation(ta, $('#dict'));
+        $('#wf').onsubmit = (e) => {
+          e.preventDefault();
+          given = ta.value.trim();
+          if (!given) return toast('Escribe o dicta tu respuesta (o pulsa "No me acuerdo")');
+          revealed = true;
+          render();
+        };
+        $('#dunno').onclick = () => { given = ''; revealed = true; render(); };
+      } else if (!revealed) {
         const show = () => { revealed = true; render(); };
         $('#flash').onclick = show;
         $('#reveal').onclick = show;
@@ -811,9 +842,28 @@
       done++;
       if (ok) { right++; toast(`${cheer()} +${POINTS_CARD} ⭐`); }
       revealed = false;
+      given = '';
       render();
     }
     render();
+  }
+
+  // Compara la respuesta escrita con la correcta para ayudar a decidir (la decisión final es del alumno).
+  function answerMatch(given, correct) {
+    const g = normalize(given), c = normalize(correct);
+    if (!g) return 'empty';
+    if (g === c) return 'exact';
+    const words = (x) => x.split(' ').filter((w) => w.length > 2);
+    const cw = words(c), gw = new Set(words(g));
+    const shared = cw.filter((w) => gw.has(w)).length;
+    if ((c.includes(g) && g.length >= c.length * 0.6) || g.includes(c) || (cw.length && shared / cw.length >= 0.7)) return 'close';
+    return 'diff';
+  }
+  function matchHtml(given, correct) {
+    const m = answerMatch(given, correct);
+    if (m === 'empty') return '<div class="feedback ko">No pasa nada: léela con atención para recordarla la próxima vez.</div>';
+    const msg = { exact: '✅ ¡Coincide con la respuesta!', close: '🤏 Se parece mucho: compáralas y decide tú.', diff: '🔍 Compara tu respuesta con la correcta.' }[m];
+    return `<div class="card your-ans ${m}"><div class="small muted">Tu respuesta</div><div class="ya">${esc(given)}</div><div class="small match-msg">${msg}</div></div>`;
   }
 
   // ---- Test ----

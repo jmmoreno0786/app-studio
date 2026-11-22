@@ -522,3 +522,14 @@ a.step:active { transform: scale(0.99); }
 @media (prefers-color-scheme: dark) {
   .box.fun { background: #3a2f0b; color: #fde68a; }
 }
+
+/* Tarjetas: escribir o dictar la respuesta antes de verla */
+.flash.no-tap { cursor: default; }
+.card-ans { min-height: 70px; font-size: 1.15rem; }
+.small-btn { min-height: 40px; margin-top: 8px; font-weight: 500; color: var(--muted); }
+.mode-toggle { justify-content: center; margin-top: 18px; color: var(--muted); font-size: 0.9rem; }
+.your-ans { text-align: center; }
+.your-ans .ya { font-size: 1.2rem; font-weight: 600; margin: 4px 0; overflow-wrap: anywhere; }
+.your-ans.exact { border-color: var(--good); background: var(--good-soft); }
+.your-ans.close { border-color: #d97706; }
+.match-msg { margin-top: 4px; }

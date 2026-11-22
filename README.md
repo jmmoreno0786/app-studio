@@ -22,7 +22,7 @@ Versión pensada para **un solo alumno** en su propio dispositivo.
   - **Automática con la API de Claude**: se guarda una clave de la API (console.anthropic.com, de pago por uso; los planes Free y Pro no incluyen créditos de API) en *Zona padres → Inteligencia artificial*. La clave se guarda solo en el dispositivo y la app llama directamente a `api.anthropic.com`. Conviene poner un límite de gasto en la consola.
 - **✨ Borrador sin IA**: esquema, resumen y tarjetas propuestas a partir del texto mediante reglas (definiciones, apartados y frases clave). Siempre hay que revisarlo.
 - **📚 Material del tema**: esquema, resumen con conceptos resaltados que se puede **escuchar en voz alta**, páginas del libro y **vídeos de YouTube**.
-- **🃏 Tarjetas de repaso** con repaso espaciado (sistema Leitner, 5 niveles: 0, 1, 3, 7 y 14 días).
+- **🃏 Tarjetas de repaso** con repaso espaciado (sistema Leitner, 5 niveles: 0, 1, 3, 7 y 14 días). Por defecto hay que **escribir o dictar la respuesta antes de verla**; la app la compara con la correcta (coincide, se parece o es distinta) y el alumno decide si la sabía. Se puede cambiar al modo de solo pensarla.
 - **📝 Test** de hasta 10 preguntas, eligiendo o escribiendo la respuesta (sin tener en cuenta mayúsculas ni tildes), con nota final.
 - **➗ Cálculo mental adaptado al curso**: sumas y restas; tablas y divisiones; porcentajes y fracción de un número; y, en ESO y Bachillerato, números enteros, potencias y raíces.
 - **⭐ Puntos y 🔥 racha** de días seguidos estudiando.
