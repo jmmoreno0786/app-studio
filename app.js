@@ -1,10 +1,10 @@
-/* App Studio — app de estudio sin dependencias.
- * Todo se guarda en el navegador (localStorage). Usa "Zona padres > Copia de seguridad"
- * para exportar/importar los datos entre dispositivos. */
+/* App Studio — app de estudio sin servidor.
+ * Los datos se guardan en el navegador: temas y progreso en localStorage, fotos en IndexedDB.
+ * Usa "Zona padres > Copia de seguridad" para pasar los datos a otro dispositivo. */
 (() => {
   'use strict';
 
-  const { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE } = window.APP_CONTENT;
+  const { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE, SUBJECTS, PUBLISHERS } = window.APP_CONTENT;
   const STORAGE_KEY = 'app-studio-v2';
   const LEGACY_KEY = 'app-studio-v1';
   const BOX_INTERVAL_DAYS = [0, 1, 3, 7, 14]; // caja 1..5 (repaso espaciado tipo Leitner)
@@ -12,6 +12,14 @@
   const POINTS_MATH = 5;
   const QUIZ_LENGTH = 10;
   const MATH_LENGTH = 10;
+
+  // Lector de texto (OCR): Tesseract.js, se descarga solo la primera vez que se usa.
+  const OCR = {
+    script: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+    langPath: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int',
+  };
 
   // ---------- Utilidades ----------
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -47,14 +55,116 @@
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^(el|la|los|las|un|una|the|a|an) /, '');
+  // Minúscula inicial salvo siglas ("ADN" se queda igual).
+  const lcFirst = (s) => (s.length > 1 && s[1] === s[1].toLowerCase() ? s[0].toLowerCase() + s.slice(1) : s);
+  const slug = (s) => normalize(s).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'tema';
 
   const courseById = (id) => COURSES.find((c) => c.id === id);
   const levelOf = (profile) => (courseById(profile?.course) || COURSES[6]).level;
+  const subjectEmoji = (name) => (SUBJECTS.find(([n]) => n === name) || [null, '📘'])[1];
+  const deckTitle = (d) => (d.unit ? `Tema ${d.unit}: ` : '') + d.name;
+  const deckMeta = (d) => [d.subject, d.publisher, courseById(d.course)?.label].filter(Boolean).join(' · ');
+
+  function downloadBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      if ($(`script[src="${src}"]`)) return resolve();
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('No se pudo descargar ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  // ---------- Fotos (IndexedDB) ----------
+  let dbPromise;
+  function db() {
+    if (!dbPromise) {
+      dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open('app-studio', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('photos');
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+    return dbPromise;
+  }
+  async function idb(mode, fn) {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const tx = d.transaction('photos', mode);
+      const req = fn(tx.objectStore('photos'));
+      tx.oncomplete = () => resolve(req?.result);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  }
+  const photoPut = (id, blob) => idb('readwrite', (s) => s.put(blob, id));
+  const photoGet = (id) => idb('readonly', (s) => s.get(id));
+  const photoDel = (id) => idb('readwrite', (s) => s.delete(id));
+  const urlCache = new Map();
+  async function photoUrl(id) {
+    if (urlCache.has(id)) return urlCache.get(id);
+    const blob = await photoGet(id).catch(() => null);
+    const url = blob ? URL.createObjectURL(blob) : null;
+    urlCache.set(id, url);
+    return url;
+  }
+  async function deletePhotos(ids) {
+    for (const id of ids || []) {
+      try { await photoDel(id); } catch (e) { /* ignorar */ }
+      if (urlCache.get(id)) URL.revokeObjectURL(urlCache.get(id));
+      urlCache.delete(id);
+    }
+  }
+  // Reduce la foto para que ocupe poco pero se pueda leer bien.
+  function compressImage(file, maxSide = 1800, quality = 0.85) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.naturalWidth * scale);
+        canvas.height = Math.round(img.naturalHeight * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob'))), 'image/jpeg', quality);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('formato')); };
+      img.src = url;
+    });
+  }
+  // Pinta las miniaturas de forma asíncrona en los <img data-photo="id">.
+  async function hydratePhotos(root = document) {
+    for (const el of $$('img[data-photo]', root)) {
+      const url = await photoUrl(el.dataset.photo);
+      if (url) el.src = url;
+      else el.replaceWith(Object.assign(document.createElement('div'), { className: 'missing', textContent: 'Foto no disponible en este dispositivo' }));
+    }
+  }
 
   // ---------- Datos ----------
   const newCard = (q, a) => ({ id: uid(), q, a, box: 1, due: todayStr() });
-  const starterDecks = (courseId) => (STARTER_BY_COURSE[courseId] || []).map((d) => ({
-    id: uid(), name: d.name, emoji: d.emoji, cards: d.cards.map(([q, a]) => newCard(q, a)),
+  const newDeck = (fields) => ({
+    id: uid(), name: '', emoji: '📘', course: '', subject: '', publisher: '', unit: '',
+    cards: [], photos: [], ocrText: '', ...fields,
+  });
+  const starterDecks = (courseId) => (STARTER_BY_COURSE[courseId] || []).map((d) => newDeck({
+    name: d.name, emoji: d.emoji, subject: d.subject || '', course: courseId,
+    cards: d.cards.map(([q, a]) => newCard(q, a)),
   }));
   const newProfile = (name, course, withStarter) => ({
     id: uid(), name, course, points: 0, streak: 0, lastStudy: null, history: {},
@@ -114,6 +224,52 @@
     card.due = addDays(todayStr(), BOX_INTERVAL_DAYS[card.box - 1]);
   }
 
+  // ---------- Compartir temas (archivo .json sin fotos) ----------
+  async function shareDeck(deck) {
+    const payload = {
+      type: 'app-studio-tema', version: 1,
+      tema: {
+        name: deck.name, emoji: deck.emoji, course: deck.course, subject: deck.subject,
+        publisher: deck.publisher, unit: deck.unit, cards: deck.cards.map((c) => ({ q: c.q, a: c.a })),
+      },
+    };
+    const filename = `${deck.unit ? "" : "tema-"}${slug(deckTitle(deck))}.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    try {
+      const file = new File([blob], filename, { type: 'application/json' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: deckTitle(deck) });
+        return;
+      }
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+    downloadBlob(blob, filename);
+  }
+  function importDeckFile(file, onDone) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result);
+        if (parsed && parsed.profiles) return toast('Eso es una copia completa: cárgala en Zona padres');
+        const t = parsed && parsed.type === 'app-studio-tema' ? parsed.tema : null;
+        if (!t || !t.name || !Array.isArray(t.cards)) throw new Error('formato');
+        const deck = newDeck({
+          name: String(t.name), emoji: String(t.emoji || subjectEmoji(t.subject)), course: String(t.course || ''),
+          subject: String(t.subject || ''), publisher: String(t.publisher || ''), unit: String(t.unit || ''),
+          cards: t.cards.filter((c) => c && c.q && c.a).map((c) => newCard(String(c.q), String(c.a))),
+        });
+        P().decks.push(deck);
+        save();
+        toast(`Tema importado (${deck.cards.length} tarjetas)`);
+        onDone(deck);
+      } catch (err) {
+        toast('Ese archivo no es un tema válido');
+      }
+    };
+    reader.readAsText(file);
+  }
+
   // ---------- UI común ----------
   const app = $('#app');
   let toastTimer;
@@ -122,7 +278,7 @@
     el.textContent = msg;
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
   }
   function renderHeader() {
     const p = P();
@@ -134,8 +290,22 @@
       <a class="who" href="#/profiles" title="Cambiar de persona">👤 ${esc(p.name)}</a>`;
   }
   const cheer = () => pick(['¡Genial!', '¡Muy bien!', '¡Correcto!', '¡Eres un crack!', '¡Perfecto!']);
-  const courseOptions = (selected) => COURSES.map((c) =>
-    `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${c.label}</option>`).join('');
+  const courseOptions = (selected, placeholder) =>
+    (placeholder ? `<option value="">${placeholder}</option>` : '') +
+    COURSES.map((c) => `<option value="${c.id}" ${c.id === selected ? 'selected' : ''}>${c.label}</option>`).join('');
+  const subjectOptions = (selected, placeholder) =>
+    (placeholder ? `<option value="">${placeholder}</option>` : '') +
+    SUBJECTS.map(([n]) => `<option value="${esc(n)}" ${n === selected ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const publisherDatalist = () => `<datalist id="publishers">${PUBLISHERS.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>`;
+  const deckTile = (d) => {
+    const due = dueCards(d).length;
+    return `<a class="card deck" href="#/deck/${d.id}">
+      <div class="emoji">${esc(d.emoji || '📘')}</div>
+      <div class="name">${esc(deckTitle(d))}</div>
+      ${deckMeta(d) ? `<div class="muted small">${esc(deckMeta(d))}</div>` : ''}
+      <div class="muted small">${d.cards.length} tarjetas${d.photos?.length ? ` · 📷 ${d.photos.length}` : ''} · ${d.cards.length ? (due ? `${due} por repasar` : 'al día ✅') : 'sin tarjetas'}</div>
+    </a>`;
+  };
 
   // ---------- Bienvenida / perfiles ----------
   function viewWelcome() {
@@ -167,6 +337,7 @@
       data.profiles.push(prof);
       data.activeId = prof.id;
       resetMathCfg();
+      resetFilters();
       save();
       go('#/');
     };
@@ -191,7 +362,7 @@
       </div>
     `;
     $$('.profile').forEach((b) => {
-      b.onclick = () => { data.activeId = b.dataset.id; resetMathCfg(); save(); go('#/'); };
+      b.onclick = () => { data.activeId = b.dataset.id; resetMathCfg(); resetFilters(); save(); go('#/'); };
     });
   }
 
@@ -216,7 +387,7 @@
     };
   }
 
-  // ---------- Inicio y temas ----------
+  // ---------- Inicio ----------
   function viewHome() {
     const p = P();
     const t = todayStr();
@@ -232,33 +403,126 @@
         <div class="card stat"><div class="num">${p.points}</div><div class="lbl">puntos</div></div>
       </div>
 
+      <div class="row" style="margin-top:16px">
+        <a class="btn" href="#/search">🔎 Buscar tema</a>
+        <a class="btn primary" href="#/new">➕ Nuevo tema</a>
+      </div>
+
       <h2>¿Qué quieres estudiar?</h2>
       <div class="grid">
-        ${p.decks.map((d) => {
-          const due = dueCards(d).length;
-          return `<a class="card deck" href="#/deck/${d.id}">
-            <div class="emoji">${esc(d.emoji || '📘')}</div>
-            <div class="name">${esc(d.name)}</div>
-            <div class="muted small">${d.cards.length} tarjetas · ${due ? `${due} por repasar` : 'al día ✅'}</div>
-          </a>`;
-        }).join('')}
+        ${p.decks.map(deckTile).join('')}
         <a class="card deck" href="#/math">
           <div class="emoji">➗</div>
           <div class="name">Cálculo mental</div>
           <div class="muted small">${MATH_BY_LEVEL[levelOf(p)].ops.map((o) => OPS[o]).slice(0, 4).join(', ')}…</div>
         </a>
-        <a class="card deck" href="#/parents">
-          <div class="emoji">➕</div>
-          <div class="name">Crear un tema</div>
-          <div class="muted small">Con tus apuntes</div>
-        </a>
       </div>
 
       <h2>Para mayores</h2>
-      <a class="btn block" href="#/parents">👨‍👩‍👦 Zona padres: temas, progreso y ajustes</a>
+      <a class="btn block" href="#/parents">👨‍👩‍👦 Zona padres: progreso y ajustes</a>
     `;
   }
 
+  // ---------- Buscador de temas ----------
+  const filters = { course: '', subject: '', publisher: '', q: '' };
+  function resetFilters() { Object.assign(filters, { course: '', subject: '', publisher: '', q: '' }); }
+
+  function viewSearch() {
+    const p = P();
+    const publishers = [...new Set(p.decks.map((d) => d.publisher).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    if (filters.publisher && !publishers.includes(filters.publisher)) filters.publisher = '';
+    app.innerHTML = `
+      <a class="back" href="#/">← Inicio</a>
+      <h1>🔎 Buscar tema</h1>
+      <div class="card">
+        <label for="fq">Buscar</label>
+        <input type="search" id="fq" value="${esc(filters.q)}" placeholder="Nº de tema, título o una palabra del contenido">
+        <div class="filters">
+          <div><label for="fc">Curso</label><select id="fc">${courseOptions(filters.course, 'Todos')}</select></div>
+          <div><label for="fs">Asignatura</label><select id="fs">${subjectOptions(filters.subject, 'Todas')}</select></div>
+          <div><label for="fp">Editorial</label><select id="fp"><option value="">Todas</option>${publishers.map((n) => `<option ${n === filters.publisher ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select></div>
+        </div>
+      </div>
+      <div id="results"></div>
+      <div class="row" style="margin-top:8px">
+        <a class="btn primary" href="#/new">➕ Nuevo tema</a>
+        <label class="btn" style="margin:0">📥 Importar tema<input type="file" id="impDeck" accept="application/json,.json" hidden></label>
+      </div>
+      <p class="muted small" style="margin-top:8px">¿Alguien te ha pasado un tema? Usa "Importar tema" con el archivo <code>.json</code> que te hayan enviado.</p>
+    `;
+    const renderResults = () => {
+      const q = normalize(filters.q);
+      const res = p.decks.filter((d) =>
+        (!filters.course || d.course === filters.course) &&
+        (!filters.subject || d.subject === filters.subject) &&
+        (!filters.publisher || d.publisher === filters.publisher) &&
+        (!q || normalize([deckTitle(d), d.subject, d.publisher, ...d.cards.flatMap((c) => [c.q, c.a])].join(' ')).includes(q)));
+      res.sort((a, b) => (a.subject || '').localeCompare(b.subject || '', 'es') || (Number(a.unit) || 0) - (Number(b.unit) || 0) || a.name.localeCompare(b.name, 'es'));
+      $('#results').innerHTML = res.length
+        ? `<p class="muted small">${res.length} ${res.length === 1 ? 'tema' : 'temas'}</p><div class="grid">${res.map(deckTile).join('')}</div>`
+        : `<div class="card center muted">No hay temas con esos filtros.<br>Puedes crearlo con "Nuevo tema".</div>`;
+    };
+    $('#fq').oninput = (e) => { filters.q = e.target.value; renderResults(); };
+    $('#fc').onchange = (e) => { filters.course = e.target.value; renderResults(); };
+    $('#fs').onchange = (e) => { filters.subject = e.target.value; renderResults(); };
+    $('#fp').onchange = (e) => { filters.publisher = e.target.value; renderResults(); };
+    $('#impDeck').onchange = (e) => {
+      const f = e.target.files[0];
+      if (f) importDeckFile(f, (deck) => go(`#/deck/${deck.id}`));
+    };
+    renderResults();
+  }
+
+  // ---------- Crear tema ----------
+  function deckFormFields(d) {
+    return `
+      <label for="tt">Título del tema</label>
+      <input type="text" id="tt" required maxlength="80" value="${esc(d.name)}" placeholder="Ej.: La célula">
+      <div class="filters">
+        <div><label for="tu">Nº de tema</label><input type="text" inputmode="numeric" id="tu" maxlength="5" value="${esc(d.unit)}" placeholder="Ej.: 3"></div>
+        <div><label for="ts">Asignatura</label><select id="ts">${subjectOptions(d.subject, 'Elige…')}</select></div>
+        <div><label for="tc">Curso</label><select id="tc">${courseOptions(d.course, 'Elige…')}</select></div>
+        <div><label for="tp">Editorial</label><input type="text" id="tp" list="publishers" maxlength="40" value="${esc(d.publisher)}" placeholder="Ej.: Anaya"></div>
+        <div><label for="te">Emoji</label><input type="text" id="te" maxlength="4" value="${esc(d.emoji && d.emoji !== '📘' ? d.emoji : '')}" placeholder="${esc(subjectEmoji(d.subject))}"></div>
+      </div>
+      ${publisherDatalist()}`;
+  }
+  function readDeckForm() {
+    const subject = $('#ts').value;
+    return {
+      name: $('#tt').value.trim(),
+      unit: $('#tu').value.trim(),
+      subject,
+      course: $('#tc').value,
+      publisher: $('#tp').value.trim(),
+      emoji: $('#te').value.trim() || subjectEmoji(subject),
+    };
+  }
+
+  function viewNew() {
+    const p = P();
+    app.innerHTML = `
+      <a class="back" href="#/">← Inicio</a>
+      <h1>➕ Nuevo tema</h1>
+      <form class="card" id="f">
+        ${deckFormFields({ name: '', unit: '', subject: filters.subject, course: filters.course || p.course, publisher: filters.publisher, emoji: '' })}
+        <button class="btn primary block" style="margin-top:16px">Crear tema</button>
+      </form>
+      <p class="muted small">Después podrás añadir las fotos de las páginas del libro o de los apuntes y crear las tarjetas.</p>
+    `;
+    $('#ts').onchange = () => { $('#te').placeholder = subjectEmoji($('#ts').value); };
+    $('#f').onsubmit = (e) => {
+      e.preventDefault();
+      const fields = readDeckForm();
+      if (!fields.name) return;
+      const deck = newDeck(fields);
+      p.decks.push(deck);
+      save();
+      go(`#/edit/${deck.id}`);
+    };
+  }
+
+  // ---------- Tema ----------
   function viewDeck(id) {
     const deck = getDeck(id);
     if (!deck) return go('#/');
@@ -266,9 +530,10 @@
     const canQuiz = deck.cards.length >= 2;
     app.innerHTML = `
       <a class="back" href="#/">← Inicio</a>
-      <h1>${esc(deck.emoji || '📘')} ${esc(deck.name)}</h1>
-      <p class="muted">${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
-      ${deck.cards.length === 0 ? `<div class="card">Este tema todavía no tiene tarjetas. Añádelas en "Editar este tema".</div>` : `
+      <h1 style="margin-bottom:2px">${esc(deck.emoji || '📘')} ${esc(deckTitle(deck))}</h1>
+      <p class="muted">${esc(deckMeta(deck))}${deckMeta(deck) ? '<br>' : ''}${deck.cards.length} tarjetas · ${due} por repasar hoy</p>
+      ${deck.photos?.length ? `<a class="btn block" href="#/photos/${deck.id}" style="margin-bottom:12px">📖 Ver fotos del tema (${deck.photos.length})</a>` : ''}
+      ${deck.cards.length === 0 ? `<div class="card">Este tema todavía no tiene tarjetas. Añádelas en "Editar este tema": a mano o a partir de las fotos.</div>` : `
       <div class="card">
         <h2 style="margin-top:0">🃏 Tarjetas</h2>
         <p class="muted small">Lee la pregunta, piensa la respuesta y dale la vuelta. Las que fallas salen más a menudo.</p>
@@ -287,6 +552,24 @@
       </div>`}
       <a class="btn ghost block" href="#/edit/${deck.id}">✏️ Editar este tema</a>
     `;
+  }
+
+  function viewPhotos(id) {
+    const deck = getDeck(id);
+    if (!deck) return go('#/');
+    app.innerHTML = `
+      <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+      <h1>📖 Fotos del tema</h1>
+      ${deck.photos.length ? deck.photos.map((pid, i) => `
+        <div class="card photo-full">
+          <div class="muted small">Foto ${i + 1} de ${deck.photos.length}</div>
+          <a data-open="${pid}"><img data-photo="${pid}" alt="Foto ${i + 1} del tema"></a>
+        </div>`).join('') : '<div class="card muted">Este tema no tiene fotos.</div>'}
+    `;
+    hydratePhotos(app);
+    $$('[data-open]').forEach((a) => {
+      a.onclick = async () => { const url = await photoUrl(a.dataset.open); if (url) window.open(url, '_blank'); };
+    });
   }
 
   // ---- Tarjetas (repaso espaciado) ----
@@ -315,7 +598,7 @@
       }
       const card = queue[0];
       app.innerHTML = `
-        <a class="back" href="#/deck/${deck.id}">← ${esc(deck.name)}</a>
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
         <div class="muted small">Tarjeta ${Math.min(done + 1, total)} de ${total}</div>
         <div class="progress"><div style="width:${(done / total) * 100}%"></div></div>
         <div class="card flash" id="flash">
@@ -386,7 +669,7 @@
       const card = questions[i];
       answered = false;
       app.innerHTML = `
-        <a class="back" href="#/deck/${deck.id}">← ${esc(deck.name)}</a>
+        <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
         <div class="muted small">Pregunta ${i + 1} de ${questions.length}</div>
         <div class="progress"><div style="width:${(i / questions.length) * 100}%"></div></div>
         <div class="card flash" style="min-height:140px;cursor:default">${esc(card.q)}</div>
@@ -465,7 +748,7 @@
         const kind = pick(['+', '−', '×']);
         let a = rand(-lim, lim), b = rand(-lim, lim);
         if (kind === '×') { a = rand(-12, 12); b = rand(-12, 12); }
-        if (a >= 0 && b >= 0) b = -rand(1, lim > 20 && kind !== '×' ? lim : 12); // siempre algún negativo
+        if (a >= 0 && b >= 0) b = -rand(1, kind === '×' ? 12 : lim); // siempre algún negativo
         const result = kind === '+' ? a + b : kind === '−' ? a - b : a * b;
         return { text: `${neg(a)} ${kind} ${neg(b)}`, result };
       }
@@ -647,18 +930,14 @@
         <ul class="list">
           ${p.decks.map((d) => {
             const mastered = d.cards.filter((c) => c.box >= 4).length;
-            return `<li><span class="qa">${esc(d.emoji || '📘')} ${esc(d.name)} <span class="muted small">· ${d.cards.length} tarjetas, ${mastered} dominadas</span></span>
+            return `<li><span class="qa">${esc(d.emoji || '📘')} ${esc(deckTitle(d))} <span class="muted small">· ${d.cards.length} tarjetas, ${mastered} dominadas</span></span>
               <a class="btn" href="#/edit/${d.id}">Editar</a></li>`;
           }).join('') || '<li class="muted">Aún no hay temas</li>'}
         </ul>
-        <form id="newDeck" style="margin-top:12px">
-          <label for="dn">Nuevo tema</label>
-          <div class="row">
-            <input type="text" id="de" placeholder="📘" maxlength="4" style="flex:0 0 64px;text-align:center" aria-label="Emoji">
-            <input type="text" id="dn" placeholder="Ej.: Ríos de España" style="flex:1 1 200px" required>
-          </div>
-          <button class="btn primary block" style="margin-top:10px">Crear tema</button>
-        </form>
+        <div class="row" style="margin-top:12px">
+          <a class="btn primary" href="#/new">➕ Nuevo tema</a>
+          <a class="btn" href="#/search">🔎 Buscar / importar</a>
+        </div>
         ${hasStarter ? '<button class="btn ghost block" id="addStarter" style="margin-top:10px">➕ Añadir temas de ejemplo de este curso</button>' : ''}
       </div>
 
@@ -673,7 +952,7 @@
 
       <div class="card">
         <h2 style="margin-top:0">Copia de seguridad</h2>
-        <p class="muted small">Los datos (de todos los perfiles) se guardan solo en este navegador. Descarga una copia para pasarlos a otro dispositivo o por si se borra el navegador.</p>
+        <p class="muted small">Los datos de todos los perfiles se guardan solo en este navegador. Descarga una copia para pasarlos a otro dispositivo o por si se borra el navegador.<br><b>Las fotos no van en la copia</b> (ocuparía demasiado): se quedan en este dispositivo.</p>
         <div class="row">
           <button class="btn" id="exp">⬇️ Descargar copia</button>
           <label class="btn" style="margin:0">⬆️ Cargar copia<input type="file" id="imp" accept="application/json,.json" hidden></label>
@@ -681,15 +960,6 @@
       </div>
     `;
 
-    $('#newDeck').onsubmit = (e) => {
-      e.preventDefault();
-      const name = $('#dn').value.trim();
-      if (!name) return;
-      const deck = { id: uid(), name, emoji: $('#de').value.trim() || '📘', cards: [] };
-      p.decks.push(deck);
-      save();
-      go(`#/edit/${deck.id}`);
-    };
     if (hasStarter) {
       $('#addStarter').onclick = () => {
         const existing = new Set(p.decks.map((d) => d.name));
@@ -703,22 +973,16 @@
     }
     $('#nm').onchange = (e) => { const v = e.target.value.trim(); if (v) { p.name = v; save(); toast('Guardado'); } };
     $('#cu').onchange = (e) => { p.course = e.target.value; resetMathCfg(); save(); viewParents(); toast('Curso cambiado'); };
-    $('#delProfile').onclick = () => {
-      if (!confirm(`¿Borrar el perfil de ${p.name} con todos sus temas y progreso?`)) return;
+    $('#delProfile').onclick = async () => {
+      if (!confirm(`¿Borrar el perfil de ${p.name} con todos sus temas, fotos y progreso?`)) return;
+      await deletePhotos(p.decks.flatMap((d) => d.photos || []));
       data.profiles = data.profiles.filter((x) => x.id !== p.id);
       data.activeId = data.profiles[0]?.id || null;
       save();
       go(data.activeId ? '#/profiles' : '#/welcome');
     };
     $('#exp').onclick = () => {
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `app-studio-${todayStr()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), `app-studio-copia-${todayStr()}.json`);
     };
     $('#imp').onchange = (e) => {
       const file = e.target.files[0];
@@ -726,7 +990,9 @@
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const parsed = migrate(JSON.parse(reader.result));
+          const raw = JSON.parse(reader.result);
+          if (raw && raw.type === 'app-studio-tema') return toast('Eso es un tema suelto: impórtalo desde "Buscar tema"');
+          const parsed = migrate(raw);
           if (!parsed || !parsed.profiles.length) throw new Error('formato');
           if (!confirm('Esto sustituirá todos los datos actuales por los de la copia. ¿Seguir?')) return;
           data = parsed;
@@ -742,18 +1008,119 @@
     };
   }
 
+  // ---------- Editar tema: datos, fotos, texto y tarjetas ----------
+  // Propone tarjetas a partir de frases típicas de libro de texto. Siempre hay que revisarlas.
+  function proposeCards(text) {
+    const clean = text.replace(/-\n(?=\p{Ll})/gu, '');
+    const paras = clean.split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+    const sentences = paras.flatMap((p) => p.split(/(?<=[.!?])\s+(?=[¿¡]?\p{Lu})/u));
+    const out = [];
+    const seen = new Set();
+    const add = (q, a) => {
+      q = q.trim().replace(/\s+/g, ' ');
+      a = a.trim().replace(/[.;,]+$/, '');
+      if (q.length < 4 || a.length < 2 || a.length > 180) return;
+      const k = normalize(q);
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ q, a });
+    };
+    for (let s of sentences) {
+      s = s.trim().replace(/\s+/g, ' ').replace(/^[•·\-–—*]\s*/, '');
+      if (s.length < 8 || s.length > 320) continue;
+      let m;
+      // "Funciones vitales: nutrición, relación y reproducción."
+      if ((m = s.match(/^([^:]{3,70}):\s+(.{2,200})$/))) { add(m[1], m[2]); continue; }
+      // "Las células sin núcleo se llaman procariotas."
+      if ((m = s.match(/^(.{3,80}?)\s+se\s+(llaman?|denominan?|conocen?\s+como)\s+(.{2,150})$/i))) {
+        add(`¿Cómo se ${m[2].toLowerCase()} ${lcFirst(m[1])}?`.replace(/ como /, ' '), m[3]);
+        continue;
+      }
+      // "La célula es la unidad básica de los seres vivos."
+      if ((m = s.match(/^([^,;:()]{2,60}?)\s+(es|son)\s+(.{5,200})$/))) {
+        if (m[1].split(' ').length > 7) continue;
+        add(`¿Qué ${m[2]} ${lcFirst(m[1])}?`, m[3]);
+      }
+    }
+    return out.slice(0, 60);
+  }
+
+  async function runOcr(deck, statusEl) {
+    if (!deck.photos.length) return toast('Primero añade alguna foto');
+    if (deck.ocrText && !confirm('Ya hay texto sacado de las fotos. ¿Sustituirlo?')) return;
+    const setStatus = (t) => { statusEl.textContent = t; };
+    let worker;
+    try {
+      setStatus('Descargando el lector de texto (solo la primera vez, puede tardar un poco)…');
+      await loadScript(OCR.script);
+      let current = 0;
+      worker = await window.Tesseract.createWorker('spa', 1, {
+        workerPath: OCR.workerPath, corePath: OCR.corePath, langPath: OCR.langPath,
+        logger: (m) => {
+          if (m.status === 'recognizing text') setStatus(`Leyendo foto ${current + 1} de ${deck.photos.length}… ${Math.round(m.progress * 100)} %`);
+        },
+      });
+      const parts = [];
+      for (current = 0; current < deck.photos.length; current++) {
+        const blob = await photoGet(deck.photos[current]);
+        if (!blob) continue;
+        setStatus(`Leyendo foto ${current + 1} de ${deck.photos.length}…`);
+        const { data: res } = await worker.recognize(blob);
+        parts.push(res.text.trim());
+      }
+      deck.ocrText = parts.join('\n\n');
+      save();
+      return true;
+    } catch (e) {
+      toast('No se pudo leer el texto. Comprueba la conexión a internet e inténtalo de nuevo.');
+      setStatus('');
+      return false;
+    } finally {
+      if (worker) worker.terminate();
+    }
+  }
+
   function viewEdit(id) {
     const deck = getDeck(id);
-    if (!deck) return go('#/parents');
+    if (!deck) return go('#/');
+    deck.photos = deck.photos || [];
     app.innerHTML = `
-      <a class="back" href="#/parents">← Zona padres</a>
-      <h1>✏️ ${esc(deck.emoji || '📘')} ${esc(deck.name)}</h1>
+      <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+      <h1>✏️ Editar tema</h1>
+
+      <details class="card" ${deck.name ? '' : 'open'}>
+        <summary><b>📋 Datos del tema</b> <span class="muted small">${esc(deckMeta(deck))}</span></summary>
+        <form id="meta">
+          ${deckFormFields(deck)}
+          <button class="btn primary block" style="margin-top:12px">Guardar datos</button>
+        </form>
+      </details>
 
       <div class="card">
-        <div class="row">
-          <input type="text" id="de" value="${esc(deck.emoji)}" maxlength="4" style="flex:0 0 64px;text-align:center" aria-label="Emoji">
-          <input type="text" id="dn" value="${esc(deck.name)}" style="flex:1 1 200px" aria-label="Nombre del tema">
+        <h2 style="margin-top:0">📷 Fotos del tema</h2>
+        <p class="muted small">Haz fotos de las páginas del libro o de los apuntes: con buena luz, la página recta y sin sombras. Puedes subir varias a la vez.</p>
+        <div class="thumbs">
+          ${deck.photos.map((pid, i) => `
+            <div class="thumb">
+              <img data-photo="${pid}" alt="Foto ${i + 1}">
+              <button class="thumb-del" data-delphoto="${pid}" aria-label="Borrar foto ${i + 1}">✕</button>
+            </div>`).join('')}
         </div>
+        <label class="btn block" style="margin:10px 0 0">📷 Añadir fotos<input type="file" id="addPhotos" accept="image/*" multiple hidden></label>
+        <div id="photoStatus" class="muted small" style="margin-top:6px"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">🔤 Texto de las fotos</h2>
+        <p class="muted small">La app puede leer el texto de las fotos (necesita internet la primera vez). Revisa el texto: puede tener algún error si la foto no es buena.</p>
+        <button class="btn block" id="ocr" ${deck.photos.length ? '' : 'disabled'}>🔤 Sacar texto de las fotos</button>
+        <div id="ocrStatus" class="muted small" style="margin-top:6px"></div>
+        <div id="ocrArea" ${deck.ocrText ? '' : 'hidden'}>
+          <label for="ocrText">Texto (puedes corregirlo)</label>
+          <textarea id="ocrText" style="min-height:200px">${esc(deck.ocrText)}</textarea>
+          <button class="btn primary block" id="propose" style="margin-top:10px">✨ Proponer tarjetas con este texto</button>
+        </div>
+        <div id="proposals"></div>
       </div>
 
       <div class="card">
@@ -767,12 +1134,12 @@
         </form>
       </div>
 
-      <div class="card">
-        <h2 style="margin-top:0">Añadir muchas de golpe</h2>
+      <details class="card">
+        <summary><b>Añadir muchas de golpe</b></summary>
         <p class="muted small">Una por línea, con la pregunta y la respuesta separadas por <b>|</b> o por <b>tabulador</b> (sirve copiar dos columnas de Excel).<br>Ejemplo: <code>Capital de Francia | París</code></p>
         <textarea id="bulk" placeholder="Pregunta | Respuesta"></textarea>
         <button class="btn block" id="bulkBtn" style="margin-top:10px">Añadir todas</button>
-      </div>
+      </details>
 
       <div class="card">
         <h2 style="margin-top:0">Tarjetas (${deck.cards.length})</h2>
@@ -786,18 +1153,108 @@
 
       <div class="row">
         <a class="btn primary" href="#/deck/${deck.id}">Ir a estudiar</a>
-        <button class="btn" id="delDeck" style="color:var(--bad)">Borrar tema</button>
+        <button class="btn" id="share" ${deck.cards.length ? '' : 'disabled'}>📤 Compartir tema</button>
       </div>
+      <p class="muted small">"Compartir tema" crea un archivo con las tarjetas (sin las fotos) para enviárselo a otra familia, por ejemplo por WhatsApp. Lo abren con "Buscar tema → Importar tema".</p>
+      <button class="btn ghost block" id="delDeck" style="color:var(--bad)">Borrar tema</button>
     `;
+    hydratePhotos(app);
 
-    const saveMeta = () => {
-      deck.name = $('#dn').value.trim() || deck.name;
-      deck.emoji = $('#de').value.trim() || '📘';
+    // Datos del tema
+    $('#ts').onchange = () => { $('#te').placeholder = subjectEmoji($('#ts').value); };
+    $('#meta').onsubmit = (e) => {
+      e.preventDefault();
+      const fields = readDeckForm();
+      if (!fields.name) return toast('El tema necesita un título');
+      Object.assign(deck, fields);
       save();
-      toast('Guardado');
+      viewEdit(id);
+      toast('Datos guardados');
     };
-    $('#dn').onchange = saveMeta;
-    $('#de').onchange = saveMeta;
+
+    // Fotos
+    $('#addPhotos').onchange = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+      const status = $('#photoStatus');
+      let added = 0, failed = 0;
+      for (const [i, file] of files.entries()) {
+        status.textContent = `Guardando foto ${i + 1} de ${files.length}…`;
+        try {
+          const blob = await compressImage(file);
+          const pid = uid();
+          await photoPut(pid, blob);
+          deck.photos.push(pid);
+          added++;
+        } catch (err) {
+          failed++;
+        }
+      }
+      save();
+      viewEdit(id);
+      if (added) toast(`${added} ${added === 1 ? 'foto añadida' : 'fotos añadidas'}`);
+      if (failed) setTimeout(() => toast(`${failed} ${failed === 1 ? 'foto no se pudo' : 'fotos no se pudieron'} guardar (formato no compatible o sin espacio)`), added ? 2700 : 0);
+    };
+    $$('[data-delphoto]').forEach((b) => {
+      b.onclick = async () => {
+        if (!confirm('¿Borrar esta foto?')) return;
+        await deletePhotos([b.dataset.delphoto]);
+        deck.photos = deck.photos.filter((x) => x !== b.dataset.delphoto);
+        save();
+        viewEdit(id);
+      };
+    });
+
+    // Texto (OCR) y propuestas de tarjetas
+    $('#ocr').onclick = async () => {
+      const btn = $('#ocr');
+      btn.disabled = true;
+      const ok = await runOcr(deck, $('#ocrStatus'));
+      btn.disabled = false;
+      if (ok) {
+        $('#ocrStatus').textContent = deck.ocrText ? 'Texto listo. Revísalo y pulsa "Proponer tarjetas".' : 'No se encontró texto en las fotos.';
+        $('#ocrText').value = deck.ocrText;
+        $('#ocrArea').hidden = !deck.ocrText;
+      }
+    };
+    $('#ocrText').onchange = (e) => { deck.ocrText = e.target.value; save(); };
+    $('#propose').onclick = () => {
+      deck.ocrText = $('#ocrText').value;
+      save();
+      const props = proposeCards(deck.ocrText);
+      const box = $('#proposals');
+      if (!props.length) {
+        box.innerHTML = '<p class="muted small" style="margin-top:10px">No he encontrado frases con forma de definición ("X es…", "X: …", "X se llama…"). Puedes crear las tarjetas a mano copiando del texto.</p>';
+        return;
+      }
+      box.innerHTML = `
+        <h2>Tarjetas propuestas (${props.length})</h2>
+        <p class="muted small">Revisa y corrige cada una. Desmarca las que no quieras.</p>
+        ${props.map((pr, i) => `
+          <div class="proposal">
+            <input type="checkbox" checked data-pi="${i}" aria-label="Usar esta tarjeta">
+            <div class="pq">
+              <input type="text" value="${esc(pr.q)}" data-pq="${i}" aria-label="Pregunta">
+              <textarea rows="2" data-pa="${i}" aria-label="Respuesta">${esc(pr.a)}</textarea>
+            </div>
+          </div>`).join('')}
+        <button class="btn primary block" id="addProps" style="margin-top:10px">Añadir las tarjetas marcadas</button>`;
+      $('#addProps').onclick = () => {
+        let n = 0;
+        $$('[data-pi]').forEach((cb) => {
+          if (!cb.checked) return;
+          const i = cb.dataset.pi;
+          const q = $(`[data-pq="${i}"]`).value.trim(), a = $(`[data-pa="${i}"]`).value.trim();
+          if (q && a) { deck.cards.push(newCard(q, a)); n++; }
+        });
+        if (!n) return toast('No hay ninguna tarjeta marcada');
+        save();
+        viewEdit(id);
+        toast(`${n} tarjetas añadidas`);
+      };
+    };
+
+    // Tarjetas a mano
     $('#add').onsubmit = (e) => {
       e.preventDefault();
       const q = $('#q').value.trim(), a = $('#a').value.trim();
@@ -832,11 +1289,13 @@
         viewEdit(id);
       };
     });
-    $('#delDeck').onclick = () => {
-      if (!confirm(`¿Borrar el tema "${deck.name}" y todas sus tarjetas?`)) return;
+    $('#share').onclick = () => shareDeck(deck);
+    $('#delDeck').onclick = async () => {
+      if (!confirm(`¿Borrar "${deckTitle(deck)}" con todas sus tarjetas y fotos?`)) return;
+      await deletePhotos(deck.photos);
       P().decks = P().decks.filter((d) => d.id !== deck.id);
       save();
-      go('#/parents');
+      go('#/');
     };
   }
 
@@ -854,9 +1313,12 @@
     if (!P().course) return viewChooseCourse();
     switch (parts[0]) {
       case 'deck': return viewDeck(parts[1]);
+      case 'photos': return viewPhotos(parts[1]);
       case 'study': return viewStudy(parts[1]);
       case 'quiz': return viewQuiz(parts[1], parts[2] === 'write' ? 'write' : 'choice');
       case 'math': return parts[1] === 'play' ? playMath() : viewMath();
+      case 'search': return viewSearch();
+      case 'new': return viewNew();
       case 'parents': return viewParents();
       case 'edit': return viewEdit(parts[1]);
       default: return viewHome();

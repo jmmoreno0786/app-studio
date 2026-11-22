@@ -268,3 +268,81 @@ textarea { min-height: 140px; resize: vertical; }
   z-index: 10;
 }
 .toast.show { transform: translateX(-50%) translateY(0); visibility: visible; }
+
+/* Buscador y formularios de tema */
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0 12px;
+}
+input[type="search"] {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+details.card > summary {
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+details.card[open] > summary { margin-bottom: 8px; }
+
+/* Fotos */
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+.thumb { position: relative; }
+.thumb img, .thumb .missing {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  display: block;
+}
+.missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 6px;
+}
+.thumb-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+.photo-full img { width: 100%; height: auto; border-radius: 10px; margin-top: 8px; display: block; cursor: zoom-in; }
+.photo-full .missing { min-height: 120px; border: 1px dashed var(--border); border-radius: 10px; margin-top: 8px; }
+
+/* Propuestas de tarjetas */
+.proposal {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.proposal > input[type="checkbox"] { width: 22px; height: 22px; margin-top: 12px; flex: 0 0 auto; }
+.proposal .pq { flex: 1; display: grid; gap: 6px; min-width: 0; }
+.proposal .pq textarea { min-height: 0; font-weight: 600; resize: vertical; }

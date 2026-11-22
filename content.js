@@ -29,7 +29,7 @@ window.APP_CONTENT = (() => {
 
   const PRIMARIA = [
     {
-      name: 'Capitales de Europa', emoji: '🌍',
+      name: 'Capitales de Europa', emoji: '🌍', subject: 'Ciencias Sociales',
       cards: [
         ['Capital de Francia', 'París'],
         ['Capital de Italia', 'Roma'],
@@ -40,7 +40,7 @@ window.APP_CONTENT = (() => {
       ],
     },
     {
-      name: 'Inglés: animales', emoji: '🇬🇧',
+      name: 'Animales', emoji: '🇬🇧', subject: 'Inglés',
       cards: [
         ['Perro', 'Dog'],
         ['Gato', 'Cat'],
@@ -54,7 +54,7 @@ window.APP_CONTENT = (() => {
 
   const ESO1 = [
     {
-      name: 'Geografía: el planeta y España', emoji: '🗺️',
+      name: 'El planeta y España', emoji: '🗺️', subject: 'Geografía e Historia',
       cards: [
         ['Océano más grande del planeta', 'Pacífico'],
         ['Océano que separa Europa de América', 'Atlántico'],
@@ -69,7 +69,7 @@ window.APP_CONTENT = (() => {
       ],
     },
     {
-      name: 'Biología: los seres vivos', emoji: '🔬',
+      name: 'Los seres vivos', emoji: '🔬', subject: 'Biología y Geología',
       cards: [
         ['Unidad básica de todos los seres vivos', 'La célula'],
         ['Las tres funciones vitales', 'Nutrición, relación y reproducción'],
@@ -84,7 +84,7 @@ window.APP_CONTENT = (() => {
       ],
     },
     {
-      name: 'Historia: Prehistoria y primeras civilizaciones', emoji: '🏺',
+      name: 'Prehistoria y primeras civilizaciones', emoji: '🏺', subject: 'Geografía e Historia',
       cards: [
         ['Etapas de la Prehistoria', 'Paleolítico, Neolítico y Edad de los Metales'],
         ['Invento que marca el final de la Prehistoria', 'La escritura'],
@@ -99,7 +99,7 @@ window.APP_CONTENT = (() => {
       ],
     },
     {
-      name: 'Lengua: gramática y tildes', emoji: '✍️',
+      name: 'Gramática y tildes', emoji: '✍️', subject: 'Lengua Castellana y Literatura',
       cards: [
         ['Palabra que nombra personas, animales, objetos o ideas', 'Sustantivo'],
         ['Palabra que acompaña al sustantivo y expresa cualidades', 'Adjetivo'],
@@ -114,7 +114,7 @@ window.APP_CONTENT = (() => {
       ],
     },
     {
-      name: 'Inglés: verbos irregulares', emoji: '🇬🇧',
+      name: 'Verbos irregulares', emoji: '🇬🇧', subject: 'Inglés',
       cards: [
         ['be (pasado – participio)', 'was/were – been'],
         ['go (pasado – participio)', 'went – gone'],
@@ -138,5 +138,35 @@ window.APP_CONTENT = (() => {
     '1eso': ESO1,
   };
 
-  return { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE };
+  // Asignaturas (con su emoji por defecto).
+  const SUBJECTS = [
+    ['Matemáticas', '📐'],
+    ['Lengua Castellana y Literatura', '✍️'],
+    ['Inglés', '🇬🇧'],
+    ['Francés', '🇫🇷'],
+    ['Ciencias de la Naturaleza', '🌱'],
+    ['Ciencias Sociales', '🌍'],
+    ['Biología y Geología', '🔬'],
+    ['Geografía e Historia', '🗺️'],
+    ['Física y Química', '⚗️'],
+    ['Tecnología', '⚙️'],
+    ['Música', '🎵'],
+    ['Educación Plástica y Visual', '🎨'],
+    ['Educación Física', '⚽'],
+    ['Lengua cooficial', '🗣️'],
+    ['Latín', '🏛️'],
+    ['Filosofía', '💭'],
+    ['Economía', '💶'],
+    ['Religión / Valores', '🕊️'],
+    ['Otra', '📘'],
+  ];
+
+  // Sugerencias para el campo "Editorial" (se puede escribir cualquier otra).
+  const PUBLISHERS = [
+    'Anaya', 'SM', 'Santillana', 'Edelvives', 'Vicens Vives', 'Oxford', 'McGraw Hill', 'Editex',
+    'Bruño', 'Edebé', 'Casals', 'Teide', 'Algaida', 'Everest', 'Pearson', 'Burlington Books',
+    'Cambridge', 'Macmillan',
+  ];
+
+  return { COURSES, MATH_BY_LEVEL, STARTER_BY_COURSE, SUBJECTS, PUBLISHERS };
 })();
