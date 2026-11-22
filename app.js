@@ -476,6 +476,10 @@
         ${row(5, 'test', '📝 Test', deck.cards.length ? 'Saca un 7 o más para la estrella' : 'Hace falta tener tarjetas', `#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}`, deck.cards.length > 0)}
       </div>
 
+      ${outlineTree(deck.lesson?.outline).length >= 2 ? `<a class="card deck map-card" href="#/map/${deck.id}" style="margin-bottom:12px">
+        <div class="name">🧠 Mapa interactivo del tema</div>
+        <div class="muted small">Explora el esquema tocando las ramas y juega a "¿Dónde va?"</div>
+      </a>` : ''}
       ${deck.labelEx?.length ? `<div class="card">
         <h2 style="margin-top:0">🏷️ Imágenes para completar</h2>
         <p class="muted small">Dibujos del libro con los nombres tapados: ¿sabrías ponerlos?</p>
@@ -488,6 +492,134 @@
       ${deck.cards.length ? `<div class="row" style="margin-bottom:12px"><a class="btn" href="#/quiz/${deck.id}/write">✏️ Test escribiendo la respuesta</a></div>` : ''}
       <a class="btn ghost block" href="#/edit/${deck.id}">✏️ Editar este tema</a>
     `;
+  }
+
+  // ---- Mapa interactivo del esquema ----
+  // Convierte el esquema ("# apartado", "- idea", "  - subidea") en ramas con ideas.
+  function outlineTree(text) {
+    const branches = [];
+    let cur = null, lastIdea = null;
+    for (const raw of String(text || '').split(/\r?\n/)) {
+      if (!raw.trim()) continue;
+      let m;
+      if ((m = raw.trim().match(/^#+\s*(.+)$/))) { cur = { title: m[1].trim(), ideas: [] }; branches.push(cur); lastIdea = null; continue; }
+      if ((m = raw.match(/^(\s*)[-•*]\s+(.+)$/))) {
+        const sub = m[1].length >= 2;
+        if (!cur) { cur = { title: '', ideas: [] }; branches.push(cur); }
+        if (sub && lastIdea) lastIdea.subs.push(m[2].trim());
+        else { lastIdea = { text: m[2].trim(), subs: [] }; cur.ideas.push(lastIdea); }
+      }
+    }
+    // Sin títulos: cada idea principal es una rama y sus subideas, sus ideas.
+    if (branches.length === 1 && !branches[0].title) {
+      return branches[0].ideas.map((i) => ({ title: i.text, ideas: i.subs.map((t) => ({ text: t, subs: [] })) })).filter((b) => b.ideas.length);
+    }
+    return branches.filter((b) => b.title && b.ideas.length);
+  }
+  const MAP_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#8b5cf6', '#ef4444', '#14b8a6'];
+  const MAP_EMOJI = ['🔵', '🌸', '🌟', '🌿', '💧', '🔮', '🔥', '🐬'];
+  const stripMd = (t) => String(t).replace(/\*\*/g, '');
+
+  function viewMap(id, mode) {
+    const deck = getDeck(id);
+    const tree = outlineTree(deck?.lesson?.outline);
+    if (!deck || tree.length < 2) return go(`#/deck/${id}`);
+    const open = new Set();
+    const color = (i) => MAP_COLORS[i % MAP_COLORS.length];
+
+    function header(active) {
+      return `<a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+        <div class="map-tabs">
+          <a class="chip ${active === 'explore' ? 'on' : ''}" href="#/map/${deck.id}">🧭 Explorar</a>
+          <a class="chip ${active === 'game' ? 'on' : ''}" href="#/map/${deck.id}/juego">🎯 ¿Dónde va?</a>
+        </div>`;
+    }
+
+    function explore() {
+      app.innerHTML = `${header('explore')}
+        <div class="map">
+          <div class="map-center"><span>${esc(deck.emoji || '📘')}</span>${esc(deck.name)}</div>
+          <p class="muted small center">Toca cada rama para descubrir sus ideas. Toca una idea para escucharla.</p>
+          <div class="map-branches">
+            ${tree.map((b, i) => `
+              <div class="branch ${open.has(i) ? 'open' : ''}" style="--c:${color(i)}">
+                <button class="branch-head" data-b="${i}">
+                  <span class="branch-n">${i + 1}</span>
+                  <span class="branch-t">${inline(b.title)}</span>
+                  <span class="branch-count">${open.has(i) ? '−' : b.ideas.length}</span>
+                </button>
+                ${open.has(i) ? `<div class="branch-ideas">${b.ideas.map((idea, k) => `
+                  <button class="idea" data-say-text="${esc(stripMd(idea.text))}" style="animation-delay:${k * 90}ms">${inline(idea.text)}
+                    ${idea.subs.length ? `<span class="subs">${idea.subs.map((t) => `<span class="sub">${inline(t)}</span>`).join('')}</span>` : ''}
+                  </button>`).join('')}</div>` : ''}
+              </div>`).join('')}
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="openAll">${open.size === tree.length ? '🙈 Cerrar todas' : '👀 Abrir todas'}</button>
+            <a class="btn primary" href="#/map/${deck.id}/juego">🎯 Jugar a "¿Dónde va?"</a>
+          </div>
+        </div>`;
+      $$('.branch-head').forEach((b) => {
+        b.onclick = () => {
+          const i = Number(b.dataset.b);
+          if (open.has(i)) open.delete(i); else { open.add(i); if (speech.supported) speech.play([stripMd(tree[i].title)], 1, () => {}, () => {}); }
+          explore();
+        };
+      });
+      $$('.idea').forEach((el) => {
+        el.onclick = () => {
+          $$('.idea').forEach((x) => x.classList.remove('speaking'));
+          el.classList.add('speaking');
+          if (speech.supported) speech.play([el.dataset.sayText], 1, () => {}, () => el.classList.remove('speaking'));
+        };
+      });
+      $('#openAll').onclick = () => { if (open.size === tree.length) open.clear(); else tree.forEach((_, i) => open.add(i)); explore(); };
+    }
+
+    function game() {
+      const pool = shuffle(tree.flatMap((b, i) => b.ideas.map((idea) => ({ text: idea.text, b: i }))));
+      const rounds = pool.slice(0, Math.min(12, pool.length));
+      let r = 0, score = 0, streak = 0, bestStreak = 0, locked = false;
+      function round() {
+        if (r >= rounds.length) {
+          const pct = score / rounds.length;
+          app.innerHTML = `${header('game')}
+            <div class="card center">
+              <div class="huge">${pct === 1 ? '🏆' : pct >= 0.7 ? '🎉' : '💪'}</div>
+              <h1>${score} de ${rounds.length}</h1>
+              <p>Mejor racha: <b>${bestStreak}</b> 🔥</p>
+              <p class="muted">${pct === 1 ? '¡Perfecto! Te sabes la estructura del tema.' : 'Repasa las ramas en "Explorar" y vuelve a intentarlo.'}</p>
+              <div class="row"><button class="btn primary" id="again">🔁 Otra partida</button><a class="btn" href="#/map/${deck.id}">🧭 Explorar el mapa</a></div>
+            </div>`;
+          $('#again').onclick = game;
+          return;
+        }
+        const q = rounds[r];
+        locked = false;
+        app.innerHTML = `${header('game')}
+          <div class="game-top"><span>Idea ${r + 1} de ${rounds.length}</span><span>⭐ ${score}</span><span class="streak ${streak >= 3 ? 'hot' : ''}">🔥 ${streak}</span></div>
+          <div class="progress"><div style="width:${(r / rounds.length) * 100}%"></div></div>
+          <div class="card idea-card pop">${inline(q.text)}</div>
+          <p class="center muted">¿A qué rama del tema pertenece?</p>
+          <div class="game-branches">${tree.map((b, i) => `<button class="game-b" data-gb="${i}" style="--c:${color(i)}"><span class="branch-n">${i + 1}</span>${inline(b.title)}</button>`).join('')}</div>
+          <div id="gfb"></div>`;
+        $$('.game-b').forEach((btn) => {
+          btn.onclick = () => {
+            if (locked) return;
+            locked = true;
+            const ok = Number(btn.dataset.gb) === q.b;
+            recordAnswer(ok, 5);
+            if (ok) { score++; streak++; bestStreak = Math.max(bestStreak, streak); btn.classList.add('right'); } else { streak = 0; btn.classList.add('wrong'); $(`.game-b[data-gb="${q.b}"]`).classList.add('right'); }
+            $('#gfb').innerHTML = `<div class="feedback ${ok ? 'ok' : 'ko'}">${ok ? (streak >= 3 ? `¡Racha de ${streak}! 🔥 +5` : `${cheer()} +5`) : 'Esa idea va en la rama verde'}</div>`;
+            setTimeout(() => { r++; round(); }, ok ? 900 : 1800);
+          };
+        });
+        onKey((k) => { const b = $$('.game-b')[Number(k) - 1]; if (b) b.click(); });
+      }
+      round();
+    }
+
+    if (mode === 'juego') game(); else explore();
   }
 
   // ---- Imagen muda: poner los nombres ----
@@ -3082,6 +3214,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
       case 'learn': return viewLearn(parts[1]);
       case 'explain': return viewExplain(parts[1]);
       case 'labels': return viewLabels(parts[1], parts[2]);
+      case 'map': return viewMap(parts[1], parts[2]);
       case 'blank': return viewBlank(parts[1]);
       case 'dev': return viewDev(parts[1], parts[2] != null && parts[2] !== '' ? Number(parts[2]) : null);
       case 'study': return viewStudy(parts[1]);
