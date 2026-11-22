@@ -5,7 +5,6 @@ App sencilla para ayudar a estudiar, desde 1º de Primaria hasta Bachillerato. E
 ## Qué tiene
 
 - **👤 Perfiles por persona y curso**: al entrar por primera vez pregunta el nombre y el curso. Se pueden añadir varias personas en el mismo dispositivo, cada una con sus temas y su progreso.
-
 - **🃏 Tarjetas de repaso**: pregunta delante y respuesta detrás. Usa repaso espaciado (sistema Leitner con 5 niveles): las tarjetas que se fallan vuelven a salir ese mismo día y las que se saben se espacian 1, 3, 7 y 14 días.
 - **📝 Test**: 10 preguntas de un tema, eligiendo la respuesta entre opciones o escribiéndola. Al acabar da una nota y la lista de fallos. Al comprobar las respuestas escritas no cuentan las mayúsculas ni las tildes.
 - **➗ Cálculo mental adaptado al curso**:
