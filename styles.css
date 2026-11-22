@@ -61,10 +61,24 @@ html, body {
   font-size: 1.1rem;
   color: var(--text);
   text-decoration: none;
+  white-space: nowrap;
 }
+@media (max-width: 420px) { .brand .txt { display: none; } }
 
 .score { display: flex; gap: 10px; font-weight: 600; font-size: 0.95rem; }
+.score { align-items: center; }
 .score span { white-space: nowrap; }
+.who {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--primary-soft);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
 
 .container {
   max-width: 720px;
@@ -99,6 +113,8 @@ p { margin: 0 0 12px; }
   text-decoration: none;
   margin: 0;
 }
+button.deck { font: inherit; color: inherit; text-align: left; cursor: pointer; width: 100%; }
+.deck.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary); }
 .deck .emoji { font-size: 2rem; }
 .deck .name { font-weight: 700; margin-top: 4px; }
 
@@ -170,6 +186,9 @@ p { margin: 0 0 12px; }
 .option.wrong { background: var(--bad-soft); border-color: var(--bad); }
 
 label { display: block; font-weight: 600; margin: 12px 0 6px; }
+label.check { display: flex; align-items: center; gap: 10px; font-weight: 500; margin-top: 16px; }
+label.check input { width: 22px; height: 22px; }
+label.check[hidden] { display: none; }
 input[type="text"], input[type="number"], textarea, select {
   width: 100%;
   padding: 12px;
