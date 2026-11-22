@@ -30,7 +30,7 @@ Para usarla desde el móvil o la tablet, lo más fácil es publicarla con **GitH
 
 ## Dónde se guardan los datos
 
-Todo se guarda **solo en el navegador del dispositivo**: temas y progreso en `localStorage`, y fotos y libros en IndexedDB. No se envía nada a ningún sitio, salvo cuando se usa la IA: entonces las fotos o el texto del tema se envían a Claude (Anthropic). Otra conexión externa es la descarga del lector de texto (unos MB desde cdn.jsdelivr.net) la primera vez que se usa "Sacar texto de las fotos". Las fotos se leen en el propio dispositivo y no se suben a ningún sitio. Por eso:
+Todo se guarda **solo en el navegador del dispositivo**: temas y progreso en `localStorage`, y fotos y libros en IndexedDB. No se envía nada a ningún sitio, salvo cuando se usa la IA: entonces las fotos o el texto del tema se envían a Claude (Anthropic). También se descargan desde cdn.jsdelivr.net, la primera vez que se usan, el lector de texto de las fotos (unos MB) y el lector de PDF. Las fotos se leen en el propio dispositivo y no se suben a ningún sitio. Por eso:
 
 - Para pasar los temas y el progreso a otro dispositivo, usa *Zona padres → Copia de seguridad*.
 - Si se borran los datos del navegador, se pierde el progreso. Conviene descargar una copia de vez en cuando.
