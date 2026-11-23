@@ -10,6 +10,15 @@ export type Section = {
   figure: Figure | null;
 };
 
+// Escena del guion de vídeo que escribe Claude: texto corto en pantalla, narración e imagen.
+export type Beat = {
+  section: number; // índice del apartado (desde 0)
+  text: string; // texto en pantalla (corto, con **negrita**)
+  narration: string; // lo que dice la voz
+  emoji: string;
+  image: { src: string; credit: string } | null;
+};
+
 export type QuizQuestion = { q: string; options: string[]; correct: number };
 
 export type LessonData = {
@@ -18,6 +27,8 @@ export type LessonData = {
   subject: string;
   intro: string;
   sections: Section[];
+  // Si hay guion de Claude, el cuerpo del vídeo se hace con estas escenas en vez de con los apartados.
+  beats?: Beat[];
   timeline: { date: string; event: string }[];
   causes: { cause: string; effect: string }[];
   glossary: { term: string; def: string }[];
@@ -28,6 +39,7 @@ export type SceneKind =
   | 'intro'
   | 'sectionTitle'
   | 'sentence'
+  | 'beat'
   | 'figure'
   | 'example'
   | 'funFact'

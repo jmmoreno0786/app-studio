@@ -495,6 +495,104 @@
     `;
   }
 
+  // ---------- Guion del vídeo (Claude) con más imágenes ----------
+  // Ilustraciones del libro disponibles en la explicación, numeradas desde 1.
+  const bookFigures = (deck) => (deck.explain?.apartados || []).flatMap((a, ai) =>
+    (a.imagenes || []).filter((im) => deck.photos.includes(im.pid)).map((im) => ({ ...im, apartado: ai })));
+
+  const videoSchema = () => obj({
+    escenas: arr(obj({
+      apartado: { type: 'integer' },
+      texto_pantalla: str,
+      narracion: str,
+      emoji: str,
+      imagen: obj({ tipo: { type: 'string', enum: ['libro', 'wikipedia', 'ninguna'] }, figura: { type: 'integer' }, articulo: str }),
+    })),
+  });
+
+  // Imagen principal de artículos de la Wikipedia en español (solo admite imágenes de licencia libre).
+  async function wikipediaImages(titles) {
+    const out = {};
+    const list = [...new Set(titles.filter(Boolean))];
+    for (let k = 0; k < list.length; k += 40) {
+      const batch = list.slice(k, k + 40);
+      const url = `https://es.wikipedia.org/w/api.php?action=query&format=json&origin=*&redirects=1&prop=pageimages&piprop=thumbnail&pithumbsize=900&titles=${encodeURIComponent(batch.join('|'))}`;
+      const res = await fetch(url).then((r) => r.json()).catch(() => null);
+      if (!res?.query) continue;
+      const alias = {};
+      for (const n of res.query.normalized || []) alias[n.from] = n.to;
+      for (const r of res.query.redirects || []) alias[r.from] = r.to;
+      const byTitle = {};
+      for (const pg of Object.values(res.query.pages || {})) if (pg.thumbnail?.source) byTitle[pg.title] = { src: pg.thumbnail.source, title: pg.title };
+      for (const t of batch) {
+        let f = t;
+        for (let i = 0; i < 3 && alias[f]; i++) f = alias[f];
+        if (byTitle[f]) out[t] = byTitle[f];
+      }
+    }
+    return out;
+  }
+
+  async function aiVideoScript(deck, onStatus) {
+    const ex = deck.explain;
+    const figs = bookFigures(deck);
+    const course = courseById(deck.course)?.label || courseById(P().course)?.label || 'Secundaria';
+    const temario = ex.apartados.map((a, i) => `APARTADO ${i + 1}: ${a.titulo}\n${a.texto}${a.ejemplo ? `\nEjemplo: ${a.ejemplo}` : ''}${a.sabias_que ? `\nCuriosidad: ${a.sabias_que}` : ''}`).join('\n\n');
+    const figList = figs.length ? figs.map((f, i) => `${i + 1}. (apartado ${f.apartado + 1}) ${f.pie || 'ilustración'}`).join('\n') : '(no hay)';
+    const prompt = `Eres guionista de vídeos educativos para alumnos de ${course}. Escribe el guion de un vídeo animado y ameno que explique TODO el tema "${deckTitle(deck)}"${deck.subject ? ` de ${deck.subject}` : ''}, a partir de esta explicación:
+
+INTRODUCCIÓN: ${ex.intro}
+
+${temario}
+
+Ilustraciones del libro disponibles:
+${figList}
+
+Divide cada apartado, en orden, en escenas cortas (entre 12 y 30 escenas en total). Cada escena:
+- "apartado": número del apartado al que pertenece (empezando en 1).
+- "texto_pantalla": lo que se ve escrito, muy corto (máximo 90 caracteres), con el concepto clave en **negrita**.
+- "narracion": lo que dice la voz: de 1 a 3 frases (máximo 45 palabras), claras y cercanas. Debe explicar lo mismo que el texto de pantalla, ampliándolo un poco.
+- "emoji": uno o dos emojis que representen la escena.
+- "imagen": "tipo" = "libro" con "figura" = número de la ilustración del libro si una encaja con la escena; "wikipedia" con "articulo" = título exacto de un artículo de la Wikipedia en español cuya imagen principal ilustre bien la escena (por ejemplo "Mitocondria", "Cueva de Altamira" o "Neolítico"); o "ninguna". Pon imagen en al menos la mitad de las escenas y no repitas la misma. Usa solo artículos que existan y sean adecuados para su edad. En "figura" pon 0 y en "articulo" "" cuando no se usen.
+Usa solo información del tema; no inventes datos.`;
+    onStatus('Claude está escribiendo el guion del vídeo…');
+    const { text, cost } = await aiRequest({
+      content: [{ type: 'text', text: prompt }], schema: videoSchema(), maxTokens: 16000,
+      onProgress: (n) => onStatus(`Claude está escribiendo el guion del vídeo… (${n.toLocaleString('es-ES')} caracteres)`),
+    });
+    const o = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+    const raw = (Array.isArray(o.escenas) ? o.escenas : []).map((e) => ({
+      section: Math.max(0, Math.min(ex.apartados.length - 1, (Number(e.apartado) || 1) - 1)),
+      text: S(e.texto_pantalla), narration: S(e.narracion), emoji: S(e.emoji).slice(0, 8), image: e.imagen || {},
+    })).filter((b) => b.text);
+    if (!raw.length) throw new Error('Claude no ha devuelto el guion del vídeo');
+    onStatus('Buscando imágenes para el vídeo…');
+    const wiki = await wikipediaImages(raw.filter((b) => b.image.tipo === 'wikipedia').map((b) => S(b.image.articulo))).catch(() => ({}));
+    const beats = raw.map((b) => {
+      let image = null;
+      if (b.image.tipo === 'libro' && figs[b.image.figura - 1]) {
+        const f = figs[b.image.figura - 1];
+        image = { kind: 'book', pid: f.pid, x: f.x, y: f.y, w: f.w, h: f.h };
+      } else if (b.image.tipo === 'wikipedia' && wiki[S(b.image.articulo)]) {
+        const w = wiki[S(b.image.articulo)];
+        image = { kind: 'wiki', src: w.src, title: w.title };
+      }
+      return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image };
+    });
+    deck.videoScript = { beats, made: todayStr() };
+    save();
+    return { cost, images: beats.filter((b) => b.image).length, total: beats.length };
+  }
+
+  // Comprueba que una imagen carga (si no, el vídeo muestra el emoji).
+  const imageLoads = (src, ms = 7000) => new Promise((resolve) => {
+    const img = new Image();
+    const t = setTimeout(() => resolve(false), ms);
+    img.onload = () => { clearTimeout(t); resolve(true); };
+    img.onerror = () => { clearTimeout(t); resolve(false); };
+    img.src = src;
+  });
+
   // ---- Vídeo de la lección (Remotion Player, generado al momento con los datos del tema) ----
   let currentVideo = null;
   function stopVideo() {
@@ -518,7 +616,21 @@
     }
     const withQ = ex.apartados.filter((a) => a.pregunta);
     const pickQ = withQ.length <= 3 ? withQ : [withQ[0], withQ[Math.floor(withQ.length / 2)], withQ[withQ.length - 1]];
+    let beats;
+    if (deck.videoScript?.beats?.length) {
+      beats = await Promise.all(deck.videoScript.beats.map(async (b) => {
+        let image = null;
+        if (b.image?.kind === 'book' && deck.photos.includes(b.image.pid)) {
+          const src = await figureUrl(b.image).catch(() => null);
+          if (src) image = { src, credit: 'Imagen: libro de texto' };
+        } else if (b.image?.kind === 'wiki' && b.image.src && (await imageLoads(b.image.src))) {
+          image = { src: b.image.src, credit: `Imagen: Wikipedia (${b.image.title})` };
+        }
+        return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image };
+      }));
+    }
     return {
+      beats,
       title: deckTitle(deck),
       emoji: deck.emoji || '📘',
       subject: [deck.subject, courseById(deck.course)?.label].filter(Boolean).join(' · '),
@@ -534,6 +646,7 @@
   async function viewVideo(id) {
     const deck = getDeck(id);
     if (!deck || !deck.explain) return go(`#/deck/${id}`);
+    window.scrollTo(0, 0);
     let voiceOn = (() => { try { return localStorage.getItem('app-studio-video-voice') !== 'off'; } catch (e) { return true; } })();
     app.innerHTML = `
       <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
@@ -546,7 +659,29 @@
         ${speech.supported ? `<label class="check" style="margin:0"><input type="checkbox" id="vvoice" ${voiceOn ? 'checked' : ''}> 🔊 Narración con voz</label>` : '<p class="muted small">Este dispositivo no puede leer en voz alta: el vídeo se verá sin narración.</p>'}
       </div>
       <p class="muted small">Si la voz tarda más en leer una escena, el vídeo la espera. Toca dos veces el vídeo para verlo a pantalla completa.</p>
+      ${aiSettings().key ? `<div class="card ai" style="margin-top:12px">
+        <b>${deck.videoScript ? '🔄 Rehacer el guion del vídeo' : '✨ Mejorar el vídeo con más imágenes'}</b>
+        <p class="muted small" style="margin:6px 0 10px">${deck.videoScript ? `Guion de ${deck.videoScript.beats.length} escenas, ${deck.videoScript.beats.filter((b) => b.image).length} con imagen. Puedes pedir a Claude uno nuevo.` : 'Claude escribe un guion con escenas cortas e imágenes del libro y de la Wikipedia (unos céntimos).'}</p>
+        <button class="btn ${deck.videoScript ? '' : 'primary'} block" id="vscript">${deck.videoScript ? '🔄 Rehacer el guion' : '✨ Preparar el vídeo con Claude'}</button>
+        <div id="vsst" class="muted small" style="margin-top:6px"></div>
+      </div>` : ''}
       <div id="vdone"></div>`;
+    if ($('#vscript')) {
+      $('#vscript').onclick = async () => {
+        if (deck.videoScript && !confirm('¿Hacer un guion nuevo? El actual se sustituirá.')) return;
+        const b = $('#vscript'), st = $('#vsst');
+        b.disabled = true;
+        try {
+          const r = await aiVideoScript(deck, (t) => { st.textContent = t; });
+          toast(`Guion listo: ${r.total} escenas, ${r.images} con imagen`);
+          viewVideo(id);
+        } catch (e) {
+          st.textContent = '';
+          toast(e.message || 'No se pudo preparar el guion');
+          b.disabled = false;
+        }
+      };
+    }
     const lesson = await lessonForVideo(deck);
     try {
       await loadScript('./lesson-video.js');
@@ -564,7 +699,15 @@
     const sceneAt = (f) => { let i = 0; while (i + 1 < starts.length && starts[i + 1] <= f) i++; return i; };
 
     function setupVoice(player) {
-      let cur = -1, speaking = false, waiting = false, autoPause = false, autoPlay = false, token = 0;
+      let cur = -1, speaking = false, waiting = false, autoPause = false, autoPlay = false, autoSeek = false, token = 0;
+      // Se pausa unos fotogramas antes del final de la escena, antes de que el texto empiece a desvanecerse.
+      const HOLD = 10;
+      const waitHere = (frame) => {
+        waiting = true;
+        autoPause = true;
+        player.pause();
+        if (frame != null) { autoSeek = true; player.seekTo(frame); }
+      };
       const speakScene = (i) => {
         const my = ++token;
         speaking = true;
@@ -578,19 +721,24 @@
       player.addEventListener('frameupdate', (e) => {
         const f = e.detail.frame;
         const i = sceneAt(f);
+        if (waiting) return;
         if (i !== cur) {
+          // Si el vídeo ha saltado a la escena siguiente mientras la voz aún hablaba, vuelve atrás y espera.
+          if (voiceOn && speaking && cur >= 0 && i > cur && player.isPlaying()) {
+            waitHere(starts[cur] + scenes[cur].duration - HOLD);
+            return;
+          }
           cur = i;
           if (voiceOn && player.isPlaying()) speakScene(i);
-        } else if (voiceOn && speaking && player.isPlaying() && f >= starts[i] + scenes[i].duration - 3) {
-          // La voz no ha terminado: el vídeo espera a que acabe la escena.
-          waiting = true;
-          autoPause = true;
-          player.pause();
+        } else if (voiceOn && speaking && player.isPlaying() && f >= starts[i] + scenes[i].duration - HOLD) {
+          // La voz no ha terminado: el vídeo espera, con el texto aún visible.
+          waitHere(null);
         }
       });
       player.addEventListener('play', () => {
         $('#vstart').hidden = true;
         if (autoPlay) { autoPlay = false; return; }
+        waiting = false;
         cur = sceneAt(player.getCurrentFrame());
         if (voiceOn) speakScene(cur);
       });
@@ -598,7 +746,11 @@
         if (autoPause) { autoPause = false; return; }
         silence();
       });
-      player.addEventListener('seeked', () => { silence(); cur = -1; });
+      player.addEventListener('seeked', () => {
+        if (autoSeek) { autoSeek = false; return; }
+        silence();
+        cur = -1;
+      });
       player.addEventListener('ended', () => {
         silence();
         const first = markStep(deck, 'video');
@@ -3186,6 +3338,14 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
           st.textContent = `Hecho. Coste aproximado: ${r.cost.toLocaleString('es-ES', { maximumFractionDigits: 3 })} $`;
           if (!r.explicacion) toast('Claude no ha devuelto la explicación: prueba otra vez');
           applyAi(r);
+          if (deck.explain) {
+            try {
+              const v = await aiVideoScript(deck, (t) => { st.textContent = t; });
+              st.textContent = `Hecho. Coste aproximado: ${(r.cost + v.cost).toLocaleString('es-ES', { maximumFractionDigits: 3 })} $ (incluye el guion del vídeo: ${v.total} escenas, ${v.images} con imagen)`;
+            } catch (err) {
+              st.textContent = `Hecho. Coste aproximado: ${r.cost.toLocaleString('es-ES', { maximumFractionDigits: 3 })} $ · El guion del vídeo no se pudo hacer; puedes pedirlo desde el vídeo.`;
+            }
+          }
         } catch (e) {
           st.textContent = '';
           toast(e.message || 'No se pudo completar');

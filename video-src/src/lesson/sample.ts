@@ -29,6 +29,12 @@ export const sampleLesson = (): LessonData => ({
       figure: null,
     },
   ],
+  beats: [
+    { section: 0, text: 'Todos los seres vivos están hechos de **células**', narration: 'Todos los seres vivos, desde una pequeña bacteria hasta un elefante, estamos hechos de células.', emoji: '🐘🦠', image: null },
+    { section: 0, text: 'La célula es la **unidad básica** de la vida', narration: 'La célula es la unidad básica de la vida: la parte más pequeña que puede nutrirse, relacionarse y reproducirse.', emoji: '🔬', image: { src: staticFile('celula-rotulos.jpg'), credit: 'Imagen: libro de texto' } },
+    { section: 1, text: '**Procariotas**: sin núcleo definido', narration: 'Las células procariotas no tienen un núcleo definido. Las bacterias son así.', emoji: '🦠', image: null },
+    { section: 1, text: '**Eucariotas**: con núcleo', narration: 'Las eucariotas sí tienen núcleo, como las células de animales y plantas.', emoji: '🌱🐶', image: { src: staticFile('celula-rotulos.jpg'), credit: 'Imagen: Wikipedia' } },
+  ],
   timeline: [
     { date: '1665', event: 'Robert Hooke ve por primera vez las "celdillas" del corcho' },
     { date: '1839', event: 'Schleiden y Schwann: todos los seres vivos están formados por células' },

@@ -57,6 +57,54 @@ export const SectionTitleScene: React.FC<P> = ({ scene }) => {
   );
 };
 
+
+// Panel visual: una imagen (del libro o de la Wikipedia) con zoom lento, o un emoji grande animado.
+const Visual: React.FC<{ src?: string; credit?: string; emoji?: string; color: string; duration: number }> = ({ src, credit, emoji, color, duration }) => {
+  const frame = useCurrentFrame();
+  const pop = usePop(6, 13);
+  if (src) {
+    return (
+      <div style={{ flex: '0 0 44%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: pop, translate: `${(1 - pop) * 60}px 0px` }}>
+        <div style={{ position: 'relative', width: '100%', height: '100%', maxHeight: 470, borderRadius: 30, overflow: 'hidden', border: `6px solid ${color}`, background: '#fff', boxShadow: '0 18px 44px rgba(0,0,0,0.2)' }}>
+          <Img src={src} style={{ width: '100%', height: '100%', objectFit: 'contain', scale: String(interpolate(frame, [0, duration], [1, 1.1], clamp)) }} />
+          {emoji ? <div style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 64, rotate: `${Math.sin(frame / 9) * 10}deg` }}>{emoji}</div> : null}
+        </div>
+        {credit ? <div style={{ fontSize: 22, color: '#475569' }}>{credit}</div> : null}
+      </div>
+    );
+  }
+  return (
+    <div style={{ flex: '0 0 40%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ width: 380, height: 380, borderRadius: '50%', background: `color-mix(in srgb, ${color} 18%, #ffffff)`, border: `8px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(pop), boxShadow: `0 0 0 ${18 + Math.sin(frame / 8) * 10}px ${color}22` }}>
+        <div style={{ fontSize: emoji && emoji.length > 3 ? 120 : 190, lineHeight: 1, whiteSpace: 'nowrap', translate: `0px ${Math.sin(frame / 7) * 10}px`, rotate: `${Math.sin(frame / 11) * 8}deg` }}>{emoji || '📘'}</div>
+      </div>
+    </div>
+  );
+};
+
+// Escena del guion de Claude: texto corto en pantalla + imagen o emoji.
+export const BeatScene: React.FC<P> = ({ scene }) => {
+  const { fps } = useVideoConfig();
+  const d = scene.data;
+  const c = colorFor(scene.section);
+  const card = usePop(3, 16);
+  return (
+    <SceneFrame color={c} duration={scene.duration} light>
+      {d.sectionTitle ? (
+        <div style={{ position: 'absolute', top: 44, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+          <Chip bg={c}>{shorten(d.sectionTitle, 48)}</Chip>
+        </div>
+      ) : null}
+      <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '110px 70px 70px', gap: 40 }}>
+        <div style={{ flex: 1, background: '#fff', borderRadius: 36, padding: '38px 46px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 60, 52, 46), lineHeight: 1.3, color: '#1f2333', fontWeight: 600, scale: String(0.9 + card * 0.1), opacity: card }}>
+          <Highlighted text={d.text} start={0.5 * fps} />
+        </div>
+        <Visual src={d.image?.src} credit={d.image?.credit} emoji={d.emoji} color={c} duration={scene.duration} />
+      </AbsoluteFill>
+    </SceneFrame>
+  );
+};
+
 export const SentenceScene: React.FC<P> = ({ scene }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -68,11 +116,20 @@ export const SentenceScene: React.FC<P> = ({ scene }) => {
       <div style={{ position: 'absolute', top: 56, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
         <Chip bg={c}>{shorten(d.title, 48)}</Chip>
       </div>
-      <AbsoluteFill style={center}>
-        <div style={{ background: '#fff', borderRadius: 36, padding: '44px 56px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 60, 52, 46), lineHeight: 1.35, color: '#1f2333', maxWidth: 1060, scale: String(0.9 + card * 0.1), opacity: card }}>
-          <Highlighted text={d.text} start={0.5 * fps} />
-        </div>
-      </AbsoluteFill>
+      {d.figure ? (
+        <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '120px 70px 100px', gap: 40 }}>
+          <div style={{ flex: '1 1 58%', background: '#fff', borderRadius: 36, padding: '36px 44px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 50, 46, 42), lineHeight: 1.35, color: '#1f2333', scale: String(0.9 + card * 0.1), opacity: card }}>
+            <Highlighted text={d.text} start={0.5 * fps} />
+          </div>
+          <Visual src={d.figure.src} credit="" emoji="" color={c} duration={scene.duration} />
+        </AbsoluteFill>
+      ) : (
+        <AbsoluteFill style={center}>
+          <div style={{ background: '#fff', borderRadius: 36, padding: '44px 56px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 60, 52, 46), lineHeight: 1.35, color: '#1f2333', maxWidth: 1060, scale: String(0.9 + card * 0.1), opacity: card }}>
+            <Highlighted text={d.text} start={0.5 * fps} />
+          </div>
+        </AbsoluteFill>
+      )}
       <div style={{ position: 'absolute', bottom: 56, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 14 }}>
         {Array.from({ length: d.of }).map((_, i) => (
           <div key={i} style={{ width: 22, height: 22, borderRadius: '50%', background: i <= d.k ? c : `${c}40`, scale: i === d.k ? String(interpolate(frame, [0, 10], [0.4, 1.2], clamp)) : '1' }} />
@@ -273,6 +330,7 @@ export const SCENE_COMPONENTS: Record<Scene['kind'], React.FC<P>> = {
   intro: IntroScene,
   sectionTitle: SectionTitleScene,
   sentence: SentenceScene,
+  beat: BeatScene,
   figure: FigureScene,
   example: ExampleScene,
   funFact: FunFactScene,
