@@ -626,3 +626,15 @@ a.step:active { transform: scale(0.99); }
 .game-b.right { background: var(--good-soft); border-color: var(--good); animation: pop-in 0.3s; }
 .game-b.wrong { background: var(--bad-soft); border-color: var(--bad); animation: shake 0.35s; }
 @keyframes shake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+
+/* Vídeo de la lección */
+.video-box { position: relative; }
+.video-player { width: 100%; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #1e1b4b; color: #fff; }
+.video-start {
+  position: absolute; left: 50%; top: 50%; translate: -50% -50%; z-index: 2;
+  padding: 18px 34px; border-radius: 999px; border: 0; cursor: pointer;
+  background: #fff; color: #4f46e5; font: inherit; font-size: 1.4rem; font-weight: 800;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+/* Que el vídeo quepa entero en pantalla también en horizontal */
+.video-box { max-width: min(100%, calc((100vh - 230px) * 16 / 9)); margin: 0 auto; }

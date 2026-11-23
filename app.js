@@ -470,10 +470,11 @@
         <div class="route-head"><h2 style="margin:0">🧭 Tu ruta de estudio</h2><span class="stars">${starsHtml(deck)}</span></div>
         <p class="muted small">Sigue los pasos en orden. Cada paso completado es una estrella.</p>
         ${row(1, 'entender', '📖 Entender el tema', ex ? `Explicación con ejemplos, curiosidades y preguntas · ${ex.apartados.length} apartados` : needAi, `#/explain/${deck.id}`, !!ex)}
-        ${row(2, 'esquema', '🗺️ Esquema en blanco', deck.lesson?.outline ? 'Recuerda cada idea del esquema antes de destaparla' : needAi, `#/blank/${deck.id}`, !!deck.lesson?.outline)}
-        ${row(3, 'tarjetas', '🃏 Tarjetas', deck.cards.length ? (due ? `${due} por repasar hoy` : 'Todas al día ✅ (puedes repasarlas igual)') : 'Este tema aún no tiene tarjetas', `#/study/${deck.id}`, deck.cards.length > 0)}
-        ${row(4, 'desarrollo', '✍️ Preguntas de desarrollo', deck.dev?.length ? `${deck.dev.length} preguntas tipo examen · consigue un 5 o más` : needAi, `#/dev/${deck.id}`, !!deck.dev?.length)}
-        ${row(5, 'test', '📝 Test', deck.cards.length ? 'Saca un 7 o más para la estrella' : 'Hace falta tener tarjetas', `#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}`, deck.cards.length > 0)}
+        ${row(2, 'video', '🎬 Vídeo de la lección', ex ? 'Un repaso animado de todo el tema, narrado con la voz' : needAi, `#/video/${deck.id}`, !!ex)}
+        ${row(3, 'esquema', '🗺️ Esquema en blanco', deck.lesson?.outline ? 'Recuerda cada idea del esquema antes de destaparla' : needAi, `#/blank/${deck.id}`, !!deck.lesson?.outline)}
+        ${row(4, 'tarjetas', '🃏 Tarjetas', deck.cards.length ? (due ? `${due} por repasar hoy` : 'Todas al día ✅ (puedes repasarlas igual)') : 'Este tema aún no tiene tarjetas', `#/study/${deck.id}`, deck.cards.length > 0)}
+        ${row(5, 'desarrollo', '✍️ Preguntas de desarrollo', deck.dev?.length ? `${deck.dev.length} preguntas tipo examen · consigue un 5 o más` : needAi, `#/dev/${deck.id}`, !!deck.dev?.length)}
+        ${row(6, 'test', '📝 Test', deck.cards.length ? 'Saca un 7 o más para la estrella' : 'Hace falta tener tarjetas', `#/quiz/${deck.id}/${deck.cards.length >= 2 ? 'choice' : 'write'}`, deck.cards.length > 0)}
       </div>
 
       ${outlineTree(deck.lesson?.outline).length >= 2 ? `<a class="card deck map-card" href="#/map/${deck.id}" style="margin-bottom:12px">
@@ -492,6 +493,136 @@
       ${deck.cards.length ? `<div class="row" style="margin-bottom:12px"><a class="btn" href="#/quiz/${deck.id}/write">✏️ Test escribiendo la respuesta</a></div>` : ''}
       <a class="btn ghost block" href="#/edit/${deck.id}">✏️ Editar este tema</a>
     `;
+  }
+
+  // ---- Vídeo de la lección (Remotion Player, generado al momento con los datos del tema) ----
+  let currentVideo = null;
+  function stopVideo() {
+    if (currentVideo) { try { currentVideo.unmount(); } catch (e) { /* nada */ } currentVideo = null; }
+  }
+  // Prepara los datos de la lección para el vídeo a partir de la explicación de Claude.
+  async function lessonForVideo(deck) {
+    const ex = deck.explain;
+    const cut = (t, n) => (t.length <= n ? t : `${t.slice(0, t.lastIndexOf(' ', n) > 40 ? t.lastIndexOf(' ', n) : n)}…`);
+    const sections = [];
+    for (const a of ex.apartados) {
+      const sentences = splitSentences(String(a.texto || '').replace(/\s*\n+\s*/g, ' '))
+        .map((x) => x.trim()).filter((x) => x.length > 3).slice(0, 4).map((x) => cut(x, 230));
+      let figure = null;
+      const im = (a.imagenes || []).find((x) => deck.photos.includes(x.pid));
+      if (im) {
+        const src = await figureUrl(im).catch(() => null);
+        if (src) figure = { src, caption: im.pie || '' };
+      }
+      sections.push({ title: a.titulo, sentences, example: a.ejemplo || '', funFact: a.sabias_que || '', figure });
+    }
+    const withQ = ex.apartados.filter((a) => a.pregunta);
+    const pickQ = withQ.length <= 3 ? withQ : [withQ[0], withQ[Math.floor(withQ.length / 2)], withQ[withQ.length - 1]];
+    return {
+      title: deckTitle(deck),
+      emoji: deck.emoji || '📘',
+      subject: [deck.subject, courseById(deck.course)?.label].filter(Boolean).join(' · '),
+      intro: ex.intro || '',
+      sections,
+      timeline: ex.linea_tiempo.map((t) => ({ date: t.fecha, event: t.hecho })),
+      causes: ex.causas_consecuencias.map((c) => ({ cause: c.causa, effect: c.consecuencia })),
+      glossary: ex.glosario.map((g) => ({ term: g.termino, def: g.definicion })),
+      quiz: pickQ.map((a) => ({ q: a.pregunta.enunciado, options: a.pregunta.opciones, correct: a.pregunta.correcta })),
+    };
+  }
+
+  async function viewVideo(id) {
+    const deck = getDeck(id);
+    if (!deck || !deck.explain) return go(`#/deck/${id}`);
+    let voiceOn = (() => { try { return localStorage.getItem('app-studio-video-voice') !== 'off'; } catch (e) { return true; } })();
+    app.innerHTML = `
+      <a class="back" href="#/deck/${deck.id}">← ${esc(deckTitle(deck))}</a>
+      <h1>🎬 Vídeo de la lección</h1>
+      <div class="video-box">
+        <div id="vp" class="video-player"><div class="muted center" style="padding:40px">Preparando el vídeo…</div></div>
+        <button class="video-start" id="vstart" hidden>▶️ Ver el vídeo</button>
+      </div>
+      <div class="row" style="margin-top:12px;align-items:center">
+        ${speech.supported ? `<label class="check" style="margin:0"><input type="checkbox" id="vvoice" ${voiceOn ? 'checked' : ''}> 🔊 Narración con voz</label>` : '<p class="muted small">Este dispositivo no puede leer en voz alta: el vídeo se verá sin narración.</p>'}
+      </div>
+      <p class="muted small">Si la voz tarda más en leer una escena, el vídeo la espera. Toca dos veces el vídeo para verlo a pantalla completa.</p>
+      <div id="vdone"></div>`;
+    const lesson = await lessonForVideo(deck);
+    try {
+      await loadScript('./lesson-video.js');
+    } catch (e) {
+      $('#vp').innerHTML = '<div class="muted center" style="padding:40px">No se pudo cargar el vídeo. Comprueba la conexión y vuelve a intentarlo.</div>';
+      return;
+    }
+    if (location.hash !== `#/video/${id}`) return; // ya se ha cambiado de pantalla
+    $('#vp').innerHTML = '';
+    const handle = window.AppStudioVideo.mount($('#vp'), lesson, {
+      onReady: (player) => setupVoice(player),
+    });
+    currentVideo = handle;
+    const { scenes, starts } = handle;
+    const sceneAt = (f) => { let i = 0; while (i + 1 < starts.length && starts[i + 1] <= f) i++; return i; };
+
+    function setupVoice(player) {
+      let cur = -1, speaking = false, waiting = false, autoPause = false, autoPlay = false, token = 0;
+      const speakScene = (i) => {
+        const my = ++token;
+        speaking = true;
+        speech.play([scenes[i].narration], 1, () => {}, () => {
+          if (my !== token) return; // una lectura anterior que se ha cancelado
+          speaking = false;
+          if (waiting) { waiting = false; autoPlay = true; player.play(); }
+        });
+      };
+      const silence = () => { token++; speech.stop(); speaking = false; waiting = false; };
+      player.addEventListener('frameupdate', (e) => {
+        const f = e.detail.frame;
+        const i = sceneAt(f);
+        if (i !== cur) {
+          cur = i;
+          if (voiceOn && player.isPlaying()) speakScene(i);
+        } else if (voiceOn && speaking && player.isPlaying() && f >= starts[i] + scenes[i].duration - 3) {
+          // La voz no ha terminado: el vídeo espera a que acabe la escena.
+          waiting = true;
+          autoPause = true;
+          player.pause();
+        }
+      });
+      player.addEventListener('play', () => {
+        $('#vstart').hidden = true;
+        if (autoPlay) { autoPlay = false; return; }
+        cur = sceneAt(player.getCurrentFrame());
+        if (voiceOn) speakScene(cur);
+      });
+      player.addEventListener('pause', () => {
+        if (autoPause) { autoPause = false; return; }
+        silence();
+      });
+      player.addEventListener('seeked', () => { silence(); cur = -1; });
+      player.addEventListener('ended', () => {
+        silence();
+        const first = markStep(deck, 'video');
+        $('#vdone').innerHTML = `<div class="card center"><div class="huge">🎉</div><h2 style="margin-top:0">¡Vídeo terminado!</h2>
+          ${first ? '<p>⭐ Has ganado la estrella del vídeo</p>' : ''}
+          <div class="row"><a class="btn primary" href="#/blank/${deck.id}">🗺️ Ir al esquema en blanco</a><a class="btn" href="#/deck/${deck.id}">Volver al tema</a></div></div>`;
+        $('#vdone').scrollIntoView({ behavior: 'smooth' });
+      });
+      if ($('#vvoice')) {
+        $('#vvoice').onchange = (e) => {
+          voiceOn = e.target.checked;
+          try { localStorage.setItem('app-studio-video-voice', voiceOn ? 'on' : 'off'); } catch (err) { /* nada */ }
+          if (!voiceOn) silence(); else if (player.isPlaying()) speakScene(sceneAt(player.getCurrentFrame()));
+        };
+      }
+      const start = $('#vstart');
+      start.hidden = false;
+      start.onclick = () => {
+        // En iPad la voz solo puede empezar tras un toque: se "despierta" aquí mismo.
+        if (speech.supported && voiceOn) { try { speechSynthesis.speak(new SpeechSynthesisUtterance(' ')); } catch (e) { /* nada */ } }
+        start.hidden = true;
+        player.play();
+      };
+    }
   }
 
   // ---- Mapa interactivo del esquema ----
@@ -848,8 +979,8 @@
           <dl class="glossary">${ex.glosario.map((g) => `<div data-say><dt>${esc(g.termino)}</dt><dd>${inline(g.definicion)}</dd></div>`).join('')}</dl></div>`;
       }
       return `<div class="card center explain-card"><div class="huge">🎉</div><h2>¡Has terminado la explicación!</h2>
-        <p>Ahora toca memorizar la estructura del tema con el <b>esquema en blanco</b>.</p>
-        <div class="row">${deck.lesson?.outline ? `<a class="btn primary" href="#/blank/${deck.id}">🗺️ Ir al esquema en blanco</a>` : ''}<a class="btn" href="#/deck/${deck.id}">Volver al tema</a></div></div>`;
+        <p>Ahora repasa todo el tema con el <b>vídeo de la lección</b>.</p>
+        <div class="row"><a class="btn primary" href="#/video/${deck.id}">🎬 Ver el vídeo</a><a class="btn" href="#/deck/${deck.id}">Volver al tema</a></div></div>`;
     }
 
     function render() {
@@ -2293,6 +2424,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
   // ---------- Ruta de estudio: pasos y estrellas ----------
   const STEPS = [
     ['entender', '📖 Entender el tema'],
+    ['video', '🎬 Vídeo de la lección'],
     ['esquema', '🗺️ Esquema en blanco'],
     ['tarjetas', '🃏 Tarjetas'],
     ['desarrollo', '✍️ Preguntas de desarrollo'],
@@ -2306,7 +2438,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     deck.progress[key] = todayStr();
     P().points += 25;
     save();
-    setTimeout(() => toast(starCount(deck) === STEPS.length ? '🏆 ¡Tema completo! Tienes las 5 estrellas' : '⭐ ¡Estrella conseguida! +25 puntos'), 300);
+    setTimeout(() => toast(starCount(deck) === STEPS.length ? `🏆 ¡Tema completo! Tienes las ${STEPS.length} estrellas` : '⭐ ¡Estrella conseguida! +25 puntos'), 300);
     return true;
   }
 
@@ -3210,6 +3342,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
     if (location.hash === hash) route(); else location.hash = hash;
   }
   function route() {
+    stopVideo();
     window.onresize = null;
     $$('.lightbox').forEach((x) => x.remove());
     speech.stop();
@@ -3227,6 +3360,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
       case 'photos': return viewPhotos(parts[1]);
       case 'learn': return viewLearn(parts[1]);
       case 'explain': return viewExplain(parts[1]);
+      case 'video': return viewVideo(parts[1]);
       case 'labels': return viewLabels(parts[1], parts[2]);
       case 'map': return viewMap(parts[1], parts[2]);
       case 'blank': return viewBlank(parts[1]);

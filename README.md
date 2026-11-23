@@ -13,10 +13,11 @@ Versión pensada para **un solo alumno** en su propio dispositivo.
 - **🔤 Texto del tema**: viene del PDF, se lee de las fotos (OCR con [Tesseract.js](https://github.com/naptha/tesseract.js), en el navegador) o se pega a mano.
 - **🧭 Ruta de estudio por tema** (una ⭐ por paso):
   1. **📖 Entender el tema**: explicación por pantallas, como la de un buen profesor. Lleva introducción, cada apartado explicado con las **ilustraciones del libro** que ayudan a entenderlo (Claude indica en qué página está cada una y qué zona ocupa, la app la recorta con margen y al tocarla se ve la página completa), un ejemplo de la vida cotidiana, "¿Sabías que…?" y una pregunta de comprensión para poder seguir. Termina con la línea del tiempo, las causas y consecuencias y un glosario, y todo se puede escuchar.
-  2. **🗺️ Esquema en blanco**: las ideas del esquema aparecen tapadas y hay que recordarlas antes de destaparlas (opcionalmente también los títulos), para memorizar la estructura del tema.
-  3. **🃏 Tarjetas**: repaso espaciado.
-  4. **✍️ Preguntas de desarrollo** tipo examen. Se escribe o se dicta la respuesta. Con clave de API, Claude la corrige (nota, lo que está bien, lo que falta, consejo y puntos clave incluidos). Sin clave, el alumno se autoevalúa con los puntos clave y ve la respuesta modelo.
-  5. **📝 Test**: la estrella se consigue con un 7 o más.
+  2. **🎬 Vídeo de la lección**: un repaso animado de todo el tema (introducción, apartados con los conceptos resaltados, ilustraciones del libro, ejemplos, curiosidades, línea del tiempo, glosario y mini-quiz), narrado con la voz del dispositivo. Se genera automáticamente para cada tema con [Remotion](https://www.remotion.dev/) Player; si la voz tarda más en leer una escena, el vídeo la espera.
+  3. **🗺️ Esquema en blanco**: las ideas del esquema aparecen tapadas y hay que recordarlas antes de destaparlas (opcionalmente también los títulos), para memorizar la estructura del tema.
+  4. **🃏 Tarjetas**: repaso espaciado.
+  5. **✍️ Preguntas de desarrollo** tipo examen. Se escribe o se dicta la respuesta. Con clave de API, Claude la corrige (nota, lo que está bien, lo que falta, consejo y puntos clave incluidos). Sin clave, el alumno se autoevalúa con los puntos clave y ve la respuesta modelo.
+  6. **📝 Test**: la estrella se consigue con un 7 o más.
 - **🧠 Mapa interactivo del tema**: el esquema convertido en un mapa de ramas de colores. En **Explorar**, al tocar una rama aparecen sus ideas con animación y al tocar una idea se lee en voz alta. En **"¿Dónde va?"** aparece una idea y hay que tocar la rama a la que pertenece, con puntos y rachas (también con las teclas 1, 2, 3…). Se genera a partir del esquema, sin coste extra.
 - **🏷️ Imágenes para completar (imagen muda)**: si en las páginas hay dibujos, esquemas o mapas con los nombres de sus partes (por ejemplo, una célula), Claude los detecta y la app tapa los nombres para que el alumno los ponga: tocando el hueco y eligiendo el nombre de una lista, o escribiéndolos sin pistas. Para tapar con precisión, la app busca cada nombre en la imagen con el lector de texto (OCR) y usa su posición exacta; los nombres que no encuentra se descartan.
 - **🤖 Preparar el tema con IA (Claude)**: con una sola petición crea la explicación, el esquema, el resumen, las preguntas de desarrollo con respuesta modelo y puntos clave, y las tarjetas.
@@ -56,5 +57,7 @@ Todo se guarda **solo en el navegador del dispositivo**: temas y progreso en `lo
 - `styles.css`: estilos (incluye modo oscuro)
 - `content.js`: cursos, operaciones de cálculo mental por nivel, asignaturas y sugerencias de editoriales
 - `app.js`: toda la lógica, sin librerías externas
+- `lesson-video.js`: el vídeo de la lección y su reproductor, empaquetados desde `video-src/`
+- `video-src/`: proyecto de Remotion con el vídeo de la lección. Para cambiarlo: `cd video-src && npm i`; se previsualiza con `npm run dev` (Remotion Studio, con una lección de ejemplo) y se vuelve a generar `lesson-video.js` con `npm run build:app`. Remotion es gratuito para particulares y equipos de hasta 3 personas.
 - `sw.js`: service worker para instalarla y usarla sin conexión (los archivos de la app se piden primero a la red, para recibir las actualizaciones)
 - `manifest.webmanifest` e iconos: datos de la app instalable
