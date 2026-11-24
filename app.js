@@ -507,6 +507,7 @@
       narracion: str,
       emoji: str,
       imagen: obj({ tipo: { type: 'string', enum: ['libro', 'wikipedia', 'ninguna'] }, figura: { type: 'integer' }, articulo: str }),
+      dibujo_svg: str,
     })),
   });
 
@@ -554,16 +555,18 @@ Divide cada apartado, en orden, en escenas cortas (entre 12 y 30 escenas en tota
 - "narracion": lo que dice la voz: de 1 a 3 frases (máximo 45 palabras), claras y cercanas. Debe explicar lo mismo que el texto de pantalla, ampliándolo un poco.
 - "emoji": uno o dos emojis que representen la escena.
 - "imagen": "tipo" = "libro" con "figura" = número de la ilustración del libro si una encaja con la escena; "wikipedia" con "articulo" = título exacto de un artículo de la Wikipedia en español cuya imagen principal ilustre bien la escena (por ejemplo "Mitocondria", "Cueva de Altamira" o "Neolítico"); o "ninguna". Pon imagen en al menos la mitad de las escenas y no repitas la misma. Usa solo artículos que existan y sean adecuados para su edad. En "figura" pon 0 y en "articulo" "" cuando no se usen.
+- "dibujo_svg": en las escenas con imagen "ninguna", un dibujo sencillo y simpático, de estilo cuaderno, que represente la idea de la escena (por ejemplo una célula con su núcleo, una pirámide, un volcán, una balanza, un mapa muy simplificado…). Reglas del dibujo: código SVG que empiece por <svg viewBox="0 0 400 300">, usando solo path, circle, ellipse, rect, line, polyline, polygon y, como mucho, 2 etiquetas text cortas; entre 4 y 16 formas; contorno stroke="#2b2b40" con stroke-width entre 3 y 6; rellenos de colores suaves; sin estilos, scripts, imágenes ni enlaces; máximo 2500 caracteres. Que se entienda de un vistazo. En las escenas con imagen del libro o de la Wikipedia, pon "".
 Usa solo información del tema; no inventes datos.`;
     onStatus('Claude está escribiendo el guion del vídeo…');
     const { text, cost } = await aiRequest({
-      content: [{ type: 'text', text: prompt }], schema: videoSchema(), maxTokens: 16000,
+      content: [{ type: 'text', text: prompt }], schema: videoSchema(), maxTokens: 32000,
       onProgress: (n) => onStatus(`Claude está escribiendo el guion del vídeo… (${n.toLocaleString('es-ES')} caracteres)`),
     });
     const o = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
     const raw = (Array.isArray(o.escenas) ? o.escenas : []).map((e) => ({
       section: Math.max(0, Math.min(ex.apartados.length - 1, (Number(e.apartado) || 1) - 1)),
       text: S(e.texto_pantalla), narration: S(e.narracion), emoji: S(e.emoji).slice(0, 8), image: e.imagen || {},
+      doodle: /^<svg[\s>]/i.test(S(e.dibujo_svg)) && S(e.dibujo_svg).length <= 6000 ? S(e.dibujo_svg) : '',
     })).filter((b) => b.text);
     if (!raw.length) throw new Error('Claude no ha devuelto el guion del vídeo');
     onStatus('Buscando imágenes para el vídeo…');
@@ -577,11 +580,11 @@ Usa solo información del tema; no inventes datos.`;
         const w = wiki[S(b.image.articulo)];
         image = { kind: 'wiki', src: w.src, title: w.title };
       }
-      return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image };
+      return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image, doodle: image ? '' : b.doodle };
     });
     deck.videoScript = { beats, made: todayStr() };
     save();
-    return { cost, images: beats.filter((b) => b.image).length, total: beats.length };
+    return { cost, images: beats.filter((b) => b.image || b.doodle).length, drawings: beats.filter((b) => b.doodle).length, total: beats.length };
   }
 
   // Comprueba que una imagen carga (si no, el vídeo muestra el emoji).
@@ -626,10 +629,11 @@ Usa solo información del tema; no inventes datos.`;
         } else if (b.image?.kind === 'wiki' && b.image.src && (await imageLoads(b.image.src))) {
           image = { src: b.image.src, credit: `Imagen: Wikipedia (${b.image.title})` };
         }
-        return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image };
+        return { section: b.section, text: b.text, narration: b.narration, emoji: b.emoji, image, doodle: image ? '' : (b.doodle || '') };
       }));
     }
     return {
+      fontUrl: './fonts/PatrickHand.woff2',
       beats,
       title: deckTitle(deck),
       emoji: deck.emoji || '📘',
@@ -660,8 +664,8 @@ Usa solo información del tema; no inventes datos.`;
       </div>
       <p class="muted small">Si la voz tarda más en leer una escena, el vídeo la espera. Toca dos veces el vídeo para verlo a pantalla completa.</p>
       ${aiSettings().key ? `<div class="card ai" style="margin-top:12px">
-        <b>${deck.videoScript ? '🔄 Rehacer el guion del vídeo' : '✨ Mejorar el vídeo con más imágenes'}</b>
-        <p class="muted small" style="margin:6px 0 10px">${deck.videoScript ? `Guion de ${deck.videoScript.beats.length} escenas, ${deck.videoScript.beats.filter((b) => b.image).length} con imagen. Puedes pedir a Claude uno nuevo.` : 'Claude escribe un guion con escenas cortas e imágenes del libro y de la Wikipedia (unos céntimos).'}</p>
+        <b>${deck.videoScript ? '🔄 Rehacer el guion del vídeo' : '✨ Mejorar el vídeo con dibujos e imágenes'}</b>
+        <p class="muted small" style="margin:6px 0 10px">${deck.videoScript ? `Guion de ${deck.videoScript.beats.length} escenas: ${deck.videoScript.beats.filter((b) => b.doodle).length} con dibujo y ${deck.videoScript.beats.filter((b) => b.image).length} con imagen. Puedes pedir a Claude uno nuevo.${deck.videoScript.beats.some((b) => b.doodle) ? '' : ' Rehazlo para que tenga dibujos.'}` : 'Claude escribe un guion con escenas cortas, dibujos que se trazan solos e imágenes del libro y de la Wikipedia (unos céntimos).'}</p>
         <button class="btn ${deck.videoScript ? '' : 'primary'} block" id="vscript">${deck.videoScript ? '🔄 Rehacer el guion' : '✨ Preparar el vídeo con Claude'}</button>
         <div id="vsst" class="muted small" style="margin-top:6px"></div>
       </div>` : ''}
@@ -673,7 +677,7 @@ Usa solo información del tema; no inventes datos.`;
         b.disabled = true;
         try {
           const r = await aiVideoScript(deck, (t) => { st.textContent = t; });
-          toast(`Guion listo: ${r.total} escenas, ${r.images} con imagen`);
+          toast(`Guion listo: ${r.total} escenas, ${r.drawings} con dibujo`);
           viewVideo(id);
         } catch (e) {
           st.textContent = '';
@@ -3341,7 +3345,7 @@ Valora sobre todo que el contenido sea correcto y completo y que esté bien expl
           if (deck.explain) {
             try {
               const v = await aiVideoScript(deck, (t) => { st.textContent = t; });
-              st.textContent = `Hecho. Coste aproximado: ${(r.cost + v.cost).toLocaleString('es-ES', { maximumFractionDigits: 3 })} $ (incluye el guion del vídeo: ${v.total} escenas, ${v.images} con imagen)`;
+              st.textContent = `Hecho. Coste aproximado: ${(r.cost + v.cost).toLocaleString('es-ES', { maximumFractionDigits: 3 })} $ (incluye el guion del vídeo: ${v.total} escenas, ${v.drawings} con dibujo)`;
             } catch (err) {
               st.textContent = `Hecho. Coste aproximado: ${r.cost.toLocaleString('es-ES', { maximumFractionDigits: 3 })} $ · El guion del vídeo no se pudo hacer; puedes pedirlo desde el vídeo.`;
             }

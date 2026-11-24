@@ -2,9 +2,9 @@
  * - Archivos de la app: primero la red (para recibir las actualizaciones) y, sin conexión, la copia guardada.
  * - Librerías de cdn.jsdelivr.net (lector de PDF y de texto): se guardan la primera vez y luego se usan sin red.
  * - Nada más (API de Claude, YouTube…) pasa por aquí. */
-const APP_CACHE = 'app-studio-app-v2';
+const APP_CACHE = 'app-studio-app-v3';
 const LIB_CACHE = 'app-studio-libs-v1';
-const APP_FILES = ['./', './index.html', './styles.css', './content.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './lesson-video.js'];
+const APP_FILES = ['./', './index.html', './styles.css', './content.js', './app.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './lesson-video.js', './fonts/PatrickHand.woff2'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(APP_CACHE).then((c) => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
