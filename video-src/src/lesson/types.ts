@@ -8,6 +8,8 @@ export type Section = {
   example: string;
   funFact: string;
   figure: Figure | null;
+  // Dibujo sencillo (SVG) que se traza solo.
+  doodle?: string;
 };
 
 // Escena del guion de vídeo que escribe Claude: texto corto en pantalla, narración e imagen.
@@ -17,11 +19,15 @@ export type Beat = {
   narration: string; // lo que dice la voz
   emoji: string;
   image: { src: string; credit: string } | null;
+  // Dibujo sencillo (SVG) hecho por Claude, que se traza solo.
+  doodle?: string;
 };
 
 export type QuizQuestion = { q: string; options: string[]; correct: number };
 
 export type LessonData = {
+  // URL de la letra a mano (la pone la app o Remotion Studio).
+  fontUrl?: string;
   title: string;
   emoji: string;
   subject: string;

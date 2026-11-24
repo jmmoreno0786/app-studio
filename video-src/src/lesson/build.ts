@@ -94,7 +94,7 @@ export function buildScenes(lesson: LessonData): { scenes: Scene[]; total: numbe
       });
       const chunks = sec.sentences.flatMap((s) => chunkText(s, 170));
       chunks.forEach((s, k) => {
-        add({ kind: 'sentence', section: i, narration: plain(s), duration: secs(s, 1.2, 3.2), data: { text: s, title: sec.title, k, of: chunks.length, figure: sec.figure } });
+        add({ kind: 'sentence', section: i, narration: plain(s), duration: secs(s, 1.2, 3.2), data: { text: s, title: sec.title, k, of: chunks.length, figure: sec.figure, doodle: k === 0 ? sec.doodle : undefined } });
       });
       if (sec.figure) {
         const cap = chunkText(sec.figure.caption || 'Fíjate en esta imagen del libro.', 160)[0];

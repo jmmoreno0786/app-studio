@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useId } from 'react';
 import { AbsoluteFill, Img, interpolate, useCurrentFrame, useVideoConfig, Easing } from 'remotion';
 import type { Scene } from './types';
 import { colorFor } from './build';
-import { Chip, Highlighted, SceneFrame, clamp, fitSize, shorten, usePop } from './ui';
+import { Chip, DrawnDoodle, Highlighted, INK, RoughBox, SceneFrame, Scribble, Wobble, clamp, fitSize, shorten, usePop } from './ui';
+import { Owl } from './mascot';
 
 type P = { scene: Scene };
+
+// Fotograma hasta el que el búho "habla" (aprox. lo que tarda la voz).
+const talk = (scene: Scene) => Math.max(20, scene.duration - 36);
 
 const center: React.CSSProperties = {
   display: 'flex',
@@ -12,205 +16,238 @@ const center: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   textAlign: 'center',
-  padding: '90px 110px',
-  gap: 26,
+  padding: '70px 120px',
+  gap: 22,
+};
+
+// Foto tipo polaroid pegada con celo, con zoom lento.
+const Polaroid: React.FC<{ src: string; credit?: string; color: string; duration: number; maxH?: number; seed?: number }> = ({ src, credit, color, duration, maxH = 430, seed = 1 }) => {
+  const frame = useCurrentFrame();
+  const pop = usePop(6, 13);
+  const tilt = seed % 2 ? 2.5 : -2.5;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, opacity: pop, scale: String(0.85 + pop * 0.15), rotate: `${tilt}deg` }}>
+      <div style={{ position: 'relative', background: '#fff', padding: '14px 14px 40px', boxShadow: '6px 8px 0 rgba(43,43,64,0.18)', border: `3px solid ${INK}` }}>
+        <div style={{ position: 'absolute', top: -16, left: '40%', width: 110, height: 30, background: `color-mix(in srgb, ${color} 35%, #fff59d)`, opacity: 0.8, rotate: '-6deg' }} />
+        <div style={{ overflow: 'hidden', maxHeight: maxH, maxWidth: 470, display: 'flex' }}>
+          <Img src={src} style={{ maxHeight: maxH, maxWidth: 470, objectFit: 'contain', scale: String(interpolate(frame, [0, duration], [1, 1.1], clamp)) }} />
+        </div>
+      </div>
+      {credit ? <div style={{ fontSize: 22, color: '#64748b', rotate: `${-tilt}deg` }}>{credit}</div> : null}
+    </div>
+  );
+};
+
+// Panel visual de una escena: dibujo que se traza solo > foto > emoji en un círculo dibujado.
+const Visual: React.FC<{ doodle?: string; src?: string; credit?: string; emoji?: string; color: string; duration: number; seed?: number }> = ({ doodle, src, credit, emoji, color, duration, seed = 1 }) => {
+  const frame = useCurrentFrame();
+  const pop = usePop(6, 11);
+  const id = useId().replace(/:/g, '');
+  if (doodle) {
+    return (
+      <div style={{ width: 500, height: 400, background: '#fff', borderRadius: 24, border: `3px dashed ${color}`, padding: 18, rotate: `${seed % 2 ? 1.5 : -1.5}deg`, boxShadow: '6px 8px 0 rgba(43,43,64,0.12)' }}>
+        <DrawnDoodle svg={doodle} start={8} seconds={Math.min(4, Math.max(2, duration / 30 / 2.2))} />
+      </div>
+    );
+  }
+  if (src) return <Polaroid src={src} credit={credit} color={color} duration={duration} seed={seed} />;
+  return (
+    <div style={{ position: 'relative', width: 360, height: 360, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(pop) }}>
+      <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+        <defs><Wobble id={`c${id}`} scale={1.5} /></defs>
+        <circle cx={50} cy={50} r={46} fill={`color-mix(in srgb, ${color} 15%, #ffffff)`} stroke={color} strokeWidth={2.5} filter={`url(#c${id})`} pathLength={1} strokeDasharray={1} strokeDashoffset={interpolate(frame, [4, 22], [1, 0], clamp)} />
+      </svg>
+      <div style={{ fontSize: emoji && emoji.length > 3 ? 120 : 180, lineHeight: 1, whiteSpace: 'nowrap', translate: `0px ${Math.sin(frame / 7) * 10}px`, rotate: `${Math.sin(frame / 11) * 8}deg` }}>{emoji || '📘'}</div>
+    </div>
+  );
 };
 
 export const IntroScene: React.FC<P> = ({ scene }) => {
-  const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const d = scene.data;
-  const emoji = usePop(4, 8);
-  const title = usePop(14, 16);
+  const c = colorFor(0);
+  const title = usePop(10, 14);
   return (
-    <SceneFrame color={colorFor(0)} duration={scene.duration}>
-      <AbsoluteFill style={center}>
-        <div style={{ fontSize: 170, scale: String(emoji), rotate: `${Math.sin(frame / 9) * 7}deg`, lineHeight: 1 }}>{d.emoji}</div>
-        <div style={{ fontSize: fitSize(d.title, 96, 80, 68), fontWeight: 900, color: '#fff', lineHeight: 1.05, opacity: title, translate: `0px ${(1 - title) * 40}px`, textShadow: '0 6px 24px rgba(0,0,0,0.25)' }}>
-          {d.title}
+    <SceneFrame color={c} duration={scene.duration}>
+      <AbsoluteFill style={{ ...center, paddingLeft: 330, alignItems: 'flex-start', textAlign: 'left' }}>
+        <div style={{ fontSize: 70, lineHeight: 1 }}>{d.emoji}</div>
+        <div>
+          <div style={{ fontSize: fitSize(d.title, 112, 92, 76), lineHeight: 1, color: c, scale: String(title), transformOrigin: 'left center' }}>{d.title}</div>
+          <Scribble color="#f59e0b" delay={18} width={520} />
         </div>
-        {d.subject ? <div style={{ opacity: interpolate(frame, [0.8 * fps, 1.2 * fps], [0, 1], clamp) }}><Chip>{d.subject}</Chip></div> : null}
+        {d.subject ? <Chip bg={c}>{d.subject}</Chip> : null}
         {d.intro ? (
-          <div style={{ fontSize: 44, color: 'rgba(255,255,255,0.95)', maxWidth: 1000, lineHeight: 1.3, opacity: interpolate(frame, [1.3 * fps, 1.9 * fps], [0, 1], clamp) }}>
-            <Highlighted text={shorten(d.intro, 200)} start={2 * fps} color="rgba(253,230,138,0.55)" />
-          </div>
+          <RoughBox color={c} delay={Math.round(1.1 * fps)} seed={3} style={{ padding: '18px 26px', maxWidth: 820 }}>
+            <div style={{ fontSize: fitSize(d.intro, 46, 42, 38), lineHeight: 1.25 }}>
+              <Highlighted text={d.intro} start={Math.round(1.6 * fps)} />
+            </div>
+          </RoughBox>
         ) : null}
       </AbsoluteFill>
+      <div style={{ position: 'absolute', left: 80, bottom: 40 }}>
+        <Owl size={230} mood="wave" talkUntil={talk(scene)} />
+      </div>
     </SceneFrame>
   );
 };
 
 export const SectionTitleScene: React.FC<P> = ({ scene }) => {
-  const d = scene.data;
-  const num = usePop(2, 9);
-  const title = usePop(10, 15);
-  return (
-    <SceneFrame color={colorFor(scene.section)} duration={scene.duration}>
-      <AbsoluteFill style={center}>
-        <div style={{ width: 200, height: 200, borderRadius: '50%', background: '#fff', color: colorFor(scene.section), fontSize: 120, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(num), boxShadow: '0 12px 40px rgba(0,0,0,0.25)' }}>
-          {d.n}
-        </div>
-        <Chip>Parte {d.n} de {d.of}</Chip>
-        <div style={{ fontSize: fitSize(d.title, 96, 80, 68), fontWeight: 900, color: '#fff', lineHeight: 1.05, opacity: title, translate: `0px ${(1 - title) * 50}px` }}>{d.title}</div>
-      </AbsoluteFill>
-    </SceneFrame>
-  );
-};
-
-
-// Panel visual: una imagen (del libro o de la Wikipedia) con zoom lento, o un emoji grande animado.
-const Visual: React.FC<{ src?: string; credit?: string; emoji?: string; color: string; duration: number }> = ({ src, credit, emoji, color, duration }) => {
   const frame = useCurrentFrame();
-  const pop = usePop(6, 13);
-  if (src) {
-    return (
-      <div style={{ flex: '0 0 44%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, opacity: pop, translate: `${(1 - pop) * 60}px 0px` }}>
-        <div style={{ position: 'relative', width: '100%', height: '100%', maxHeight: 470, borderRadius: 30, overflow: 'hidden', border: `6px solid ${color}`, background: '#fff', boxShadow: '0 18px 44px rgba(0,0,0,0.2)' }}>
-          <Img src={src} style={{ width: '100%', height: '100%', objectFit: 'contain', scale: String(interpolate(frame, [0, duration], [1, 1.1], clamp)) }} />
-          {emoji ? <div style={{ position: 'absolute', right: 12, bottom: 8, fontSize: 64, rotate: `${Math.sin(frame / 9) * 10}deg` }}>{emoji}</div> : null}
-        </div>
-        {credit ? <div style={{ fontSize: 22, color: '#475569' }}>{credit}</div> : null}
-      </div>
-    );
-  }
-  return (
-    <div style={{ flex: '0 0 40%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: 380, height: 380, borderRadius: '50%', background: `color-mix(in srgb, ${color} 18%, #ffffff)`, border: `8px solid ${color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(pop), boxShadow: `0 0 0 ${18 + Math.sin(frame / 8) * 10}px ${color}22` }}>
-        <div style={{ fontSize: emoji && emoji.length > 3 ? 120 : 190, lineHeight: 1, whiteSpace: 'nowrap', translate: `0px ${Math.sin(frame / 7) * 10}px`, rotate: `${Math.sin(frame / 11) * 8}deg` }}>{emoji || '📘'}</div>
-      </div>
-    </div>
-  );
-};
-
-// Escena del guion de Claude: texto corto en pantalla + imagen o emoji.
-export const BeatScene: React.FC<P> = ({ scene }) => {
-  const { fps } = useVideoConfig();
   const d = scene.data;
   const c = colorFor(scene.section);
-  const card = usePop(3, 16);
+  const id = useId().replace(/:/g, '');
+  const title = usePop(12, 14);
   return (
-    <SceneFrame color={c} duration={scene.duration} light>
-      {d.sectionTitle ? (
-        <div style={{ position: 'absolute', top: 44, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
-          <Chip bg={c}>{shorten(d.sectionTitle, 48)}</Chip>
+    <SceneFrame color={c} duration={scene.duration}>
+      <AbsoluteFill style={center}>
+        <div style={{ position: 'relative', width: 180, height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <svg viewBox="0 0 100 100" style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+            <defs><Wobble id={`n${id}`} scale={1.5} /></defs>
+            <path d="M50,4 C78,3 97,22 96,50 C95,79 76,97 49,96 C21,95 3,77 4,49 C5,24 22,6 54,6" fill={`color-mix(in srgb, ${c} 18%, #fff)`} stroke={c} strokeWidth={4} filter={`url(#n${id})`} pathLength={1} strokeDasharray={1} strokeDashoffset={interpolate(frame, [2, 20], [1, 0], clamp)} />
+          </svg>
+          <div style={{ position: 'relative', fontSize: 120, color: c, lineHeight: 1 }}>{d.n}</div>
+        </div>
+        <div style={{ fontSize: 40, color: '#64748b' }}>Parte {d.n} de {d.of}</div>
+        <div style={{ fontSize: fitSize(d.title, 104, 88, 72), lineHeight: 1.02, opacity: title, translate: `0px ${(1 - title) * 40}px`, maxWidth: 900 }}>{d.title}</div>
+        <Scribble color={c} delay={22} width={360} />
+      </AbsoluteFill>
+      <div style={{ position: 'absolute', right: 90, bottom: 40 }}>
+        <Owl size={190} mood="wave" talkUntil={talk(scene)} flip />
+      </div>
+    </SceneFrame>
+  );
+};
+
+// Texto en un recuadro dibujado + panel visual + búho pequeño hablando.
+const TextWithVisual: React.FC<{ scene: Scene; text: string; chip: string; visual: React.ReactNode; size: [number, number, number] }> = ({ scene, text, chip, visual, size }) => {
+  const { fps } = useVideoConfig();
+  const c = colorFor(scene.section);
+  return (
+    <SceneFrame color={c} duration={scene.duration}>
+      {chip ? (
+        <div style={{ position: 'absolute', top: 36, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+          <Chip bg={c}>{shorten(chip, 48)}</Chip>
         </div>
       ) : null}
-      <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '110px 70px 70px', gap: 40 }}>
-        <div style={{ flex: 1, background: '#fff', borderRadius: 36, padding: '38px 46px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 60, 52, 46), lineHeight: 1.3, color: '#1f2333', fontWeight: 600, scale: String(0.9 + card * 0.1), opacity: card }}>
-          <Highlighted text={d.text} start={0.5 * fps} />
+      <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '100px 60px 40px 120px', gap: 36 }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, alignSelf: 'stretch', justifyContent: 'center' }}>
+          <RoughBox color={c} delay={2} seed={scene.duration} style={{ padding: '26px 32px' }}>
+            <div style={{ fontSize: fitSize(text, size[0], size[1], size[2]), lineHeight: 1.22 }}>
+              <Highlighted text={text} start={Math.round(0.6 * fps)} />
+            </div>
+          </RoughBox>
+          <div style={{ marginLeft: -40 }}>
+            <Owl size={150} mood="talk" talkUntil={talk(scene)} delay={4} />
+          </div>
         </div>
-        <Visual src={d.image?.src} credit={d.image?.credit} emoji={d.emoji} color={c} duration={scene.duration} />
+        <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{visual}</div>
       </AbsoluteFill>
     </SceneFrame>
+  );
+};
+
+export const BeatScene: React.FC<P> = ({ scene }) => {
+  const d = scene.data;
+  const c = colorFor(scene.section);
+  return (
+    <TextWithVisual
+      scene={scene}
+      text={d.text}
+      chip={d.sectionTitle}
+      size={[62, 54, 48]}
+      visual={<Visual doodle={d.doodle} src={d.image?.src} credit={d.image?.credit} emoji={d.emoji} color={c} duration={scene.duration} seed={scene.duration} />}
+    />
   );
 };
 
 export const SentenceScene: React.FC<P> = ({ scene }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
   const d = scene.data;
   const c = colorFor(scene.section);
-  const card = usePop(3, 16);
-  return (
-    <SceneFrame color={c} duration={scene.duration} light>
-      <div style={{ position: 'absolute', top: 56, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
-        <Chip bg={c}>{shorten(d.title, 48)}</Chip>
-      </div>
-      {d.figure ? (
-        <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '120px 70px 100px', gap: 40 }}>
-          <div style={{ flex: '1 1 58%', background: '#fff', borderRadius: 36, padding: '36px 44px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 50, 46, 42), lineHeight: 1.35, color: '#1f2333', scale: String(0.9 + card * 0.1), opacity: card }}>
-            <Highlighted text={d.text} start={0.5 * fps} />
-          </div>
-          <Visual src={d.figure.src} credit="" emoji="" color={c} duration={scene.duration} />
-        </AbsoluteFill>
-      ) : (
-        <AbsoluteFill style={center}>
-          <div style={{ background: '#fff', borderRadius: 36, padding: '44px 56px', boxShadow: `0 18px 50px ${c}40`, border: `4px solid ${c}`, fontSize: fitSize(d.text, 60, 52, 46), lineHeight: 1.35, color: '#1f2333', maxWidth: 1060, scale: String(0.9 + card * 0.1), opacity: card }}>
-            <Highlighted text={d.text} start={0.5 * fps} />
-          </div>
-        </AbsoluteFill>
-      )}
-      <div style={{ position: 'absolute', bottom: 56, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 14 }}>
-        {Array.from({ length: d.of }).map((_, i) => (
-          <div key={i} style={{ width: 22, height: 22, borderRadius: '50%', background: i <= d.k ? c : `${c}40`, scale: i === d.k ? String(interpolate(frame, [0, 10], [0.4, 1.2], clamp)) : '1' }} />
-        ))}
-      </div>
-    </SceneFrame>
-  );
+  const visual = d.doodle
+    ? <Visual doodle={d.doodle} color={c} duration={scene.duration} />
+    : d.figure
+      ? <Polaroid src={d.figure.src} color={c} duration={scene.duration} maxH={380} seed={d.k} />
+      : <Owl size={300} mood="talk" talkUntil={talk(scene)} flip />;
+  return <TextWithVisual scene={scene} text={d.text} chip={d.title} size={[54, 48, 42]} visual={visual} />;
 };
 
 export const FigureScene: React.FC<P> = ({ scene }) => {
-  const frame = useCurrentFrame();
-  const durationInFrames = scene.duration;
   const d = scene.data;
   const c = colorFor(scene.section);
-  const pop = usePop(2, 16);
+  const { fps } = useVideoConfig();
   return (
-    <SceneFrame color={c} duration={scene.duration} light>
-      <AbsoluteFill style={{ ...center, padding: '50px 80px', gap: 20 }}>
+    <SceneFrame color={c} duration={scene.duration}>
+      <AbsoluteFill style={{ ...center, padding: '40px 120px 40px 260px', gap: 16 }}>
         <Chip bg={c}>📷 Fíjate en la imagen</Chip>
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: pop }}>
-          <Img
-            src={d.src}
-            style={{ maxHeight: 420, maxWidth: 1000, objectFit: 'contain', borderRadius: 24, border: `5px solid ${c}`, background: '#fff', boxShadow: '0 16px 40px rgba(0,0,0,0.18)', scale: String(interpolate(frame, [0, durationInFrames], [1, 1.07], clamp)) }}
-          />
-        </div>
+        <Polaroid src={d.src} color={c} duration={scene.duration} maxH={400} />
         {d.caption ? (
-          <div style={{ fontSize: fitSize(d.caption, 44, 40, 36), color: '#1f2333', background: '#fff', borderRadius: 22, padding: '14px 28px', maxWidth: 1080, lineHeight: 1.3 }}>
-            <Highlighted text={shorten(d.caption, 170)} start={20} />
+          <div style={{ fontSize: fitSize(d.caption, 44, 40, 36), lineHeight: 1.2, maxWidth: 900 }}>
+            <Highlighted text={d.caption} start={Math.round(0.7 * fps)} />
           </div>
         ) : null}
       </AbsoluteFill>
+      <div style={{ position: 'absolute', left: 70, bottom: 40 }}>
+        <Owl size={170} mood="talk" talkUntil={talk(scene)} />
+      </div>
     </SceneFrame>
   );
 };
 
-const Bubble: React.FC<P & { icon: string; heading: string; glow?: boolean }> = ({ scene, icon, heading, glow }) => {
-  const frame = useCurrentFrame();
+// Bocadillo del búho (ejemplos y curiosidades).
+const Bubble: React.FC<P & { heading: string; mood: 'think' | 'happy' }> = ({ scene, heading, mood }) => {
+  const { fps } = useVideoConfig();
   const c = colorFor(scene.section);
-  const iconPop = usePop(2, 7);
+  const text = scene.data.text;
   const box = usePop(10, 15);
-  const text = shorten(scene.data.text, 230);
   return (
     <SceneFrame color={c} duration={scene.duration}>
-      <AbsoluteFill style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', padding: '80px 90px', gap: 50 }}>
-        <div style={{ fontSize: 190, lineHeight: 1, scale: String(iconPop), rotate: `${Math.sin(frame / 10) * 8}deg`, filter: glow ? `drop-shadow(0 0 ${30 + Math.sin(frame / 6) * 18}px #fde047)` : undefined }}>{icon}</div>
-        <div style={{ flex: 1, background: '#fff', borderRadius: 40, padding: '40px 50px', opacity: box, translate: `${(1 - box) * 80}px 0px`, boxShadow: '0 18px 50px rgba(0,0,0,0.22)' }}>
-          <div style={{ fontSize: 52, fontWeight: 900, color: c, marginBottom: 14 }}>{heading}</div>
-          <div style={{ fontSize: fitSize(text, 50, 46, 40), lineHeight: 1.35, color: '#1f2333' }}>
-            <Highlighted text={text} start={22} />
-          </div>
+      <AbsoluteFill style={{ flexDirection: 'row', alignItems: 'center', padding: '60px 80px 60px 110px', gap: 30 }}>
+        <Owl size={280} mood={mood} talkUntil={talk(scene)} />
+        <div style={{ flex: 1, opacity: box, translate: `${(1 - box) * 60}px 0px` }}>
+          <RoughBox color={c} delay={8} seed={7} fill="#ffffff" style={{ padding: '30px 38px' }}>
+            <div style={{ fontSize: 56, color: c, marginBottom: 8 }}>{heading}</div>
+            <div style={{ fontSize: fitSize(text, 50, 46, 40), lineHeight: 1.25 }}>
+              <Highlighted text={text} start={Math.round(0.9 * fps)} />
+            </div>
+          </RoughBox>
         </div>
       </AbsoluteFill>
     </SceneFrame>
   );
 };
-export const ExampleScene: React.FC<P> = ({ scene }) => <Bubble scene={scene} icon="🧩" heading="Para entenderlo" />;
-export const FunFactScene: React.FC<P> = ({ scene }) => <Bubble scene={scene} icon="💡" heading="¿Sabías que…?" glow />;
+export const ExampleScene: React.FC<P> = ({ scene }) => <Bubble scene={scene} heading="🧩 Para entenderlo" mood="think" />;
+export const FunFactScene: React.FC<P> = ({ scene }) => <Bubble scene={scene} heading="💡 ¿Sabías que…?" mood="happy" />;
 
 export const TimelineScene: React.FC<P> = ({ scene }) => {
   const frame = useCurrentFrame();
   const items: { date: string; event: string }[] = scene.data.items;
   const c = colorFor(scene.section);
+  const id = useId().replace(/:/g, '');
   const step = (scene.duration - 30) / (items.length + 0.5);
   return (
-    <SceneFrame color={c} duration={scene.duration} light>
-      <AbsoluteFill style={{ padding: '60px 110px' }}>
-        <div style={{ fontSize: 72, fontWeight: 900, color: '#1f2333', marginBottom: 26 }}>🕰️ Línea del tiempo</div>
-        <div style={{ position: 'relative', paddingLeft: 60 }}>
-          <div style={{ position: 'absolute', left: 18, top: 10, width: 8, borderRadius: 4, background: c, height: `${interpolate(frame, [10, scene.duration - 20], [0, 100], clamp)}%` }} />
+    <SceneFrame color={c} duration={scene.duration}>
+      <AbsoluteFill style={{ padding: '50px 120px 40px 130px' }}>
+        <div style={{ fontSize: 76, color: c }}>🕰️ Línea del tiempo</div>
+        <div style={{ position: 'relative', paddingLeft: 70, marginTop: 14 }}>
+          <svg style={{ position: 'absolute', left: 12, top: 0, overflow: 'visible' }} width={30} height={items.length * 118}>
+            <defs><Wobble id={`t${id}`} scale={1.5} /></defs>
+            <path d={`M15,10 C10,${items.length * 40} 20,${items.length * 80} 15,${items.length * 112}`} fill="none" stroke={c} strokeWidth={7} strokeLinecap="round" filter={`url(#t${id})`} pathLength={1} strokeDasharray={1} strokeDashoffset={interpolate(frame, [10, scene.duration - 20], [1, 0], clamp)} />
+          </svg>
           {items.map((it, i) => {
             const t = interpolate(frame, [15 + i * step, 15 + i * step + 12], [0, 1], { ...clamp, easing: Easing.out(Easing.back(2)) });
             return (
-              <div key={i} style={{ position: 'relative', marginBottom: 22, opacity: t, translate: `${(1 - t) * 60}px 0px` }}>
-                <div style={{ position: 'absolute', left: -54, top: 10, width: 32, height: 32, borderRadius: '50%', background: c, border: '6px solid #fff', boxShadow: `0 0 0 3px ${c}` }} />
-                <div style={{ fontSize: 44, fontWeight: 900, color: c }}>{shorten(it.date, 40)}</div>
-                <div style={{ fontSize: 40, color: '#1f2333', lineHeight: 1.2 }}>{shorten(it.event, 70)}</div>
+              <div key={i} style={{ position: 'relative', marginBottom: 16, opacity: t, translate: `${(1 - t) * 60}px 0px` }}>
+                <div style={{ position: 'absolute', left: -66, top: 8, width: 34, height: 34, borderRadius: '50%', background: '#fff', border: `6px solid ${c}` }} />
+                <div style={{ fontSize: 48, color: c, lineHeight: 1.05 }}>{shorten(it.date, 40)}</div>
+                <div style={{ fontSize: 42, lineHeight: 1.1 }}>{shorten(it.event, 75)}</div>
               </div>
             );
           })}
         </div>
       </AbsoluteFill>
+      <div style={{ position: 'absolute', right: 70, bottom: 30 }}>
+        <Owl size={170} mood="talk" talkUntil={talk(scene)} flip />
+      </div>
     </SceneFrame>
   );
 };
@@ -219,21 +256,27 @@ export const CausesScene: React.FC<P> = ({ scene }) => {
   const frame = useCurrentFrame();
   const items: { cause: string; effect: string }[] = scene.data.items;
   const c = colorFor(scene.section);
+  const id = useId().replace(/:/g, '');
   const step = (scene.duration - 30) / (items.length + 0.3);
   return (
-    <SceneFrame color={c} duration={scene.duration} light>
-      <AbsoluteFill style={{ padding: '60px 90px', gap: 26, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ fontSize: 72, fontWeight: 900, color: '#1f2333' }}>🔗 Causas y consecuencias</div>
+    <SceneFrame color={c} duration={scene.duration}>
+      <AbsoluteFill style={{ padding: '50px 90px 40px 130px', gap: 22, display: 'flex', flexDirection: 'column' }}>
+        <div style={{ fontSize: 76, color: c }}>🔗 Causas y consecuencias</div>
         {items.map((it, i) => {
-          const a = interpolate(frame, [12 + i * step, 24 + i * step], [0, 1], clamp);
-          const arrow = interpolate(frame, [24 + i * step, 36 + i * step], [0, 1], clamp);
-          const b = interpolate(frame, [34 + i * step, 46 + i * step], [0, 1], clamp);
-          const box: React.CSSProperties = { flex: 1, background: '#fff', borderRadius: 26, padding: '20px 26px', fontSize: 38, lineHeight: 1.25, color: '#1f2333', border: `4px solid ${c}` };
+          const a = 12 + i * step;
+          const arrow = interpolate(frame, [a + 14, a + 28], [1, 0], clamp);
           return (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-              <div style={{ ...box, opacity: a }}>{shorten(it.cause, 90)}</div>
-              <div style={{ fontSize: 70, color: c, fontWeight: 900, scale: `${arrow} 1` }}>➜</div>
-              <div style={{ ...box, opacity: b, background: `${c}18` }}>{shorten(it.effect, 90)}</div>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <RoughBox color={c} delay={a} seed={i + 2} style={{ flex: 1, padding: '16px 22px' }}>
+                <div style={{ fontSize: 40, lineHeight: 1.15 }}>{shorten(it.cause, 90)}</div>
+              </RoughBox>
+              <svg width={90} height={50} viewBox="0 0 90 50" style={{ overflow: 'visible' }}>
+                <defs><Wobble id={`a${id}${i}`} scale={1.5} /></defs>
+                <path d="M4,26 C30,20 55,30 80,24 M66,10 L82,24 L64,38" fill="none" stroke={c} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" filter={`url(#a${id}${i})`} pathLength={1} strokeDasharray={1} strokeDashoffset={arrow} />
+              </svg>
+              <RoughBox color={c} delay={a + 26} seed={i + 9} fill={`color-mix(in srgb, ${c} 12%, #fff)`} style={{ flex: 1, padding: '16px 22px' }}>
+                <div style={{ fontSize: 40, lineHeight: 1.15 }}>{shorten(it.effect, 90)}</div>
+              </RoughBox>
             </div>
           );
         })}
@@ -246,16 +289,20 @@ export const GlossaryScene: React.FC<P> = ({ scene }) => {
   const frame = useCurrentFrame();
   const d = scene.data;
   const c = colorFor(scene.section);
-  const flip = interpolate(frame, [4, 18], [90, 0], { ...clamp, easing: Easing.out(Easing.back(1.6)) });
+  const card = usePop(4, 12);
   return (
     <SceneFrame color={c} duration={scene.duration}>
-      <AbsoluteFill style={center}>
-        <Chip>📒 Palabra clave</Chip>
-        <div style={{ background: '#fff', borderRadius: 40, padding: '46px 60px', maxWidth: 1040, rotate: `0 1 0 ${flip}deg`, boxShadow: '0 18px 50px rgba(0,0,0,0.25)' }}>
-          <div style={{ fontSize: fitSize(d.term, 100, 84, 70), fontWeight: 900, color: c, lineHeight: 1.05 }}>{d.term}</div>
-          <div style={{ fontSize: fitSize(d.def, 50, 46, 40), color: '#1f2333', marginTop: 20, lineHeight: 1.3, opacity: interpolate(frame, [22, 34], [0, 1], clamp) }}>{shorten(d.def, 200)}</div>
+      <AbsoluteFill style={{ ...center, paddingLeft: 300 }}>
+        <div style={{ fontSize: 40, color: '#64748b' }}>📒 Palabra clave</div>
+        <div style={{ position: 'relative', background: '#fffef7', border: `3px solid ${INK}`, padding: '34px 50px 40px', maxWidth: 860, rotate: `${(1 - card) * 10 - 1.5}deg`, scale: String(0.8 + card * 0.2), opacity: card, boxShadow: '8px 10px 0 rgba(43,43,64,0.15)', backgroundImage: 'linear-gradient(180deg, transparent 64px, #f4a7a7 64px, #f4a7a7 67px, transparent 67px)' }}>
+          <div style={{ position: 'absolute', top: -18, left: '45%', width: 120, height: 32, background: '#fde68a', opacity: 0.85, rotate: '4deg' }} />
+          <div style={{ fontSize: fitSize(d.term, 96, 82, 70), color: c, lineHeight: 1 }}>{d.term}</div>
+          <div style={{ fontSize: fitSize(d.def, 50, 46, 40), marginTop: 22, lineHeight: 1.2, opacity: interpolate(frame, [20, 32], [0, 1], clamp) }}>{shorten(d.def, 200)}</div>
         </div>
       </AbsoluteFill>
+      <div style={{ position: 'absolute', left: 80, bottom: 40 }}>
+        <Owl size={200} mood="talk" talkUntil={talk(scene)} />
+      </div>
     </SceneFrame>
   );
 };
@@ -265,35 +312,44 @@ const QuizBase: React.FC<P & { reveal: boolean }> = ({ scene, reveal }) => {
   const { fps } = useVideoConfig();
   const d = scene.data;
   const c = colorFor(scene.section);
+  const id = useId().replace(/:/g, '');
   const left = Math.ceil((scene.duration - frame) / fps);
   const counting = !reveal && left <= 3 && left >= 1;
   return (
     <SceneFrame color={c} duration={scene.duration}>
-      <AbsoluteFill style={{ padding: '56px 90px', display: 'flex', flexDirection: 'column', gap: 26 }}>
-        <div style={{ display: 'flex' }}><Chip>🎯 Pregunta {d.n}</Chip></div>
-        <div style={{ fontSize: fitSize(d.q, 56, 50, 44), fontWeight: 900, color: '#fff', lineHeight: 1.2 }}>{shorten(d.q, 160)}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: d.options.length > 2 ? '1fr 1fr' : '1fr', gap: 20 }}>
+      <AbsoluteFill style={{ padding: '40px 90px 40px 130px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ display: 'flex' }}><Chip bg={c}>🎯 Pregunta {d.n}</Chip></div>
+        <div style={{ fontSize: fitSize(d.q, 62, 54, 46), lineHeight: 1.1 }}>{shorten(d.q, 160)}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: d.options.length > 2 ? '1fr 1fr' : '1fr', gap: 18, marginRight: 220 }}>
           {d.options.map((o: string, k: number) => {
-            const appear = interpolate(frame, [reveal ? 0 : 12 + k * 8, reveal ? 1 : 24 + k * 8], [0, 1], clamp);
             const ok = reveal && k === d.correct;
-            const okPop = reveal ? interpolate(frame, [4, 12, 18], [1, 1.08, 1.03], clamp) : 1;
             return (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 18, background: ok ? '#dcfce7' : '#fff', border: `5px solid ${ok ? '#16a34a' : 'transparent'}`, borderRadius: 26, padding: '18px 24px', fontSize: fitSize(o, 42, 38, 34), color: '#1f2333', opacity: reveal && !ok ? 0.35 : appear, scale: ok ? String(okPop) : '1' }}>
-                <span style={{ flex: '0 0 auto', width: 62, height: 62, borderRadius: 18, background: ok ? '#16a34a' : c, color: '#fff', fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{ok ? '✓' : String.fromCharCode(65 + k)}</span>
-                {shorten(o, 70)}
+              <div key={k} style={{ opacity: reveal && !ok ? 0.35 : 1, scale: ok ? String(interpolate(frame, [4, 12, 18], [1, 1.07, 1.03], clamp)) : '1' }}>
+                <RoughBox color={ok ? '#16a34a' : c} delay={reveal ? 0 : 10 + k * 7} seed={k + 3} fill={ok ? '#dcfce7' : '#ffffff'} style={{ padding: '12px 20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: fitSize(o, 44, 40, 34) }}>
+                    <span style={{ flex: '0 0 auto', width: 56, height: 56, borderRadius: '50%', border: `4px solid ${ok ? '#16a34a' : c}`, color: ok ? '#16a34a' : c, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{String.fromCharCode(65 + k)}</span>
+                    {shorten(o, 70)}
+                    {ok ? (
+                      <svg width={60} height={50} viewBox="0 0 60 50" style={{ marginLeft: 'auto' }}>
+                        <defs><Wobble id={`k${id}`} scale={1.5} /></defs>
+                        <path d="M6,26 L22,42 L54,8" fill="none" stroke="#16a34a" strokeWidth={8} strokeLinecap="round" strokeLinejoin="round" filter={`url(#k${id})`} pathLength={1} strokeDasharray={1} strokeDashoffset={interpolate(frame, [6, 18], [1, 0], clamp)} />
+                      </svg>
+                    ) : null}
+                  </div>
+                </RoughBox>
               </div>
             );
           })}
         </div>
       </AbsoluteFill>
-      {counting ? (
-        <div style={{ position: 'absolute', right: 60, bottom: 50, width: 150, height: 150, borderRadius: '50%', background: '#fff', color: c, fontSize: 96, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(interpolate((frame % fps) / fps, [0, 0.25, 1], [1.25, 1, 0.92], clamp)) }}>
-          {left}
-        </div>
-      ) : null}
-      {reveal ? (
-        <div style={{ position: 'absolute', right: 70, bottom: 50, fontSize: 120, scale: String(interpolate(frame, [0, 10], [0, 1], { ...clamp, easing: Easing.out(Easing.back(3)) })) }}>🎉</div>
-      ) : null}
+      <div style={{ position: 'absolute', right: 50, bottom: 30, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        {counting ? (
+          <div style={{ width: 120, height: 120, borderRadius: '50%', border: `6px solid ${c}`, background: '#fff', color: c, fontSize: 84, display: 'flex', alignItems: 'center', justifyContent: 'center', scale: String(interpolate((frame % fps) / fps, [0, 0.25, 1], [1.25, 1, 0.92], clamp)), marginBottom: 6 }}>
+            {left}
+          </div>
+        ) : null}
+        <Owl size={reveal ? 210 : 180} mood={reveal ? 'happy' : 'think'} talkUntil={reveal ? talk(scene) : 0} flip />
+      </div>
     </SceneFrame>
   );
 };
@@ -303,23 +359,22 @@ export const QuizRevealScene: React.FC<P> = ({ scene }) => <QuizBase scene={scen
 export const OutroScene: React.FC<P> = ({ scene }) => {
   const frame = useCurrentFrame();
   const t = usePop(6, 10);
-  const stars = Array.from({ length: 16 }).map((_, i) => {
-    const ang = (i / 16) * Math.PI * 2;
-    const dist = interpolate(frame, [0, 40], [0, 330 + (i % 3) * 60], { ...clamp, easing: Easing.out(Easing.cubic) });
-    return { x: Math.cos(ang) * dist * 1.5, y: Math.sin(ang) * dist, r: (frame * (i % 2 ? 4 : -4)) % 360 };
+  const c = colorFor(5);
+  const stars = Array.from({ length: 14 }).map((_, i) => {
+    const ang = (i / 14) * Math.PI * 2;
+    const dist = interpolate(frame, [0, 40], [0, 300 + (i % 3) * 60], { ...clamp, easing: Easing.out(Easing.cubic) });
+    return { x: Math.cos(ang) * dist * 1.6, y: Math.sin(ang) * dist, r: (frame * (i % 2 ? 4 : -4)) % 360 };
   });
   return (
-    <SceneFrame color={colorFor(5)} duration={scene.duration}>
+    <SceneFrame color={c} duration={scene.duration}>
       {stars.map((s, i) => (
-        <div key={i} style={{ position: 'absolute', left: '50%', top: '50%', fontSize: 54, translate: `${s.x - 27}px ${s.y - 27}px`, rotate: `${s.r}deg`, opacity: interpolate(frame, [0, 10, scene.duration - 20, scene.duration], [0, 1, 1, 0], clamp) }}>
-          ⭐
-        </div>
+        <div key={i} style={{ position: 'absolute', left: '50%', top: '45%', fontSize: 50, translate: `${s.x - 25}px ${s.y - 25}px`, rotate: `${s.r}deg`, opacity: interpolate(frame, [0, 10, scene.duration - 20, scene.duration], [0, 1, 1, 0], clamp) }}>⭐</div>
       ))}
-      <AbsoluteFill style={center}>
-        <div style={{ fontSize: 150, scale: String(t) }}>🏆</div>
-        <div style={{ fontSize: 100, fontWeight: 900, color: '#fff', scale: String(t) }}>¡Tema completado!</div>
+      <AbsoluteFill style={{ ...center, gap: 10 }}>
+        <Owl size={250} mood="happy" talkUntil={talk(scene)} />
+        <div style={{ fontSize: 104, color: c, scale: String(t) }}>¡Tema completado!</div>
         <div style={{ opacity: interpolate(frame, [30, 45], [0, 1], clamp) }}>
-          <Chip size={44}>Siguiente: 🗺️ Esquema en blanco</Chip>
+          <Chip bg={c} size={42}>Siguiente: 🗺️ Esquema en blanco</Chip>
         </div>
       </AbsoluteFill>
     </SceneFrame>

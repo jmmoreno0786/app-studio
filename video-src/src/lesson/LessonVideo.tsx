@@ -2,13 +2,15 @@ import React from 'react';
 import { AbsoluteFill, Series } from 'remotion';
 import type { LessonData, Scene } from './types';
 import { SCENE_COMPONENTS } from './scenes';
+import { PAPER, useHandFont } from './ui';
 
 export type LessonVideoProps = { lesson: LessonData; scenes: Scene[] };
 
 // El vídeo de una lección: una escena detrás de otra, con la duración calculada para cada una.
-export const LessonVideo: React.FC<LessonVideoProps> = ({ scenes }) => {
+export const LessonVideo: React.FC<LessonVideoProps> = ({ lesson, scenes }) => {
+  useHandFont(lesson.fontUrl);
   return (
-    <AbsoluteFill style={{ backgroundColor: '#1e1b4b' }}>
+    <AbsoluteFill style={{ backgroundColor: PAPER }}>
       <Series>
         {scenes.map((scene, i) => {
           const Comp = SCENE_COMPONENTS[scene.kind];
